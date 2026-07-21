@@ -1,0 +1,9 @@
+// /** @file
+// UfsMemHcDxe module localization strings.
+//
+// Copyright (c) 2024, EDK2 Contributors. All rights reserved.
+// SPDX-License-Identifier: BSD-2-Clause-Patent
+// **/
+
+#string STR_MODULE_ABSTRACT             #language en-US "Generic MMIO UFS Host Controller DXE Driver"
+#string STR_MODULE_DESCRIPTION          #language en-US "Binds to EDKII_UFS_MEM_HC_DEVICE_PROTOCOL and produces EDKII_UFS_HOST_CONTROLLER_PROTOCOL."

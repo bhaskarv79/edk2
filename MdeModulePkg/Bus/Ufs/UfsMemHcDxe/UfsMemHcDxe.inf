@@ -1,0 +1,54 @@
+## @file
+#  Generic MMIO-based UFS Host Controller DXE Driver.
+#
+#  UfsMemHcDxe is the MMIO counterpart of UfsPciHcDxe.  It binds to handles
+#  carrying EDKII_UFS_MEM_HC_DEVICE_PROTOCOL (installed by a thin vendor
+#  platform driver) and produces EDKII_UFS_HOST_CONTROLLER_PROTOCOL on the
+#  same handle for consumption by UfsPassThruDxe.
+#
+#  This driver contains no silicon-specific code.  PHY initialisation and
+#  UniPro tuning remain in the vendor platform driver via the
+#  EDKII_UFS_HC_PLATFORM_PROTOCOL callback mechanism.
+#
+#  Copyright (c) 2024, EDK2 Contributors. All rights reserved.
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+##
+
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = UfsMemHcDxe
+  MODULE_UNI_FILE                = UfsMemHcDxe.uni
+  FILE_GUID                      = 4F8A3E12-9C7B-4D5E-A8F1-2E6C0B934D77
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = UfsMemHcDxeEntryPoint
+
+[Sources]
+  UfsMemHcDxe.c
+  UfsMemHcDxe.h
+  UfsMemHc.c
+  ComponentName.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  DebugLib
+  UefiDriverEntryPoint
+  UefiBootServicesTableLib
+  DxeServicesTableLib
+  MemoryAllocationLib
+  UefiLib
+  IoLib
+  CacheMaintenanceLib
+
+[Protocols]
+  gEdkiiUfsMemHcDeviceProtocolGuid        ## TO_START
+  gEdkiiUfsHostControllerProtocolGuid     ## BY_START
+
+[Depex]
+  TRUE
