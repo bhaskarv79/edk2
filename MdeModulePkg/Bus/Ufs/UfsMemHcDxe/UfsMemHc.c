@@ -12,7 +12,48 @@
 
 #include <PiDxe.h>
 #include "UfsMemHcDxe.h"
+#include <Protocol/Cpu.h>
 #include <Library/DxeServicesTableLib.h>
+
+//
+// Conservative fallback used only if EFI_CPU_ARCH_PROTOCOL is unavailable or
+// reports 0 -- the largest data cache line size in common use, so the
+// alignment check below never under-estimates the true line size.
+//
+#define UFS_MEM_HC_DEFAULT_DMA_ALIGNMENT  64
+
+STATIC UINT32  mUfsMemHcDmaBufferAlignment = 0;
+
+/**
+  Returns the platform's required DMA buffer alignment (typically the CPU
+  data cache line size), caching the value after the first successful
+  lookup.
+
+  @return The alignment, in bytes.  Always a power of two.
+
+**/
+STATIC
+UINT32
+UfsMemHcGetDmaBufferAlignment (
+  VOID
+  )
+{
+  EFI_STATUS             Status;
+  EFI_CPU_ARCH_PROTOCOL  *Cpu;
+
+  if (mUfsMemHcDmaBufferAlignment != 0) {
+    return mUfsMemHcDmaBufferAlignment;
+  }
+
+  Status = gBS->LocateProtocol (&gEfiCpuArchProtocolGuid, NULL, (VOID **)&Cpu);
+  if (!EFI_ERROR (Status) && (Cpu->DmaBufferAlignment != 0)) {
+    mUfsMemHcDmaBufferAlignment = Cpu->DmaBufferAlignment;
+  } else {
+    mUfsMemHcDmaBufferAlignment = UFS_MEM_HC_DEFAULT_DMA_ALIGNMENT;
+  }
+
+  return mUfsMemHcDmaBufferAlignment;
+}
 
 /**
   Returns the MMIO base address of the UFS host controller.
@@ -51,7 +92,12 @@ UfsMemHcGetMmioBar (
 
   For BusMasterRead and BusMasterWrite a UFS_MEM_HC_MAP_INFO token is
   allocated and WriteBackDataCacheRange() is called to flush dirty CPU cache
-  lines to DRAM before the DMA engine accesses the buffer.
+  lines to DRAM before the DMA engine accesses the buffer.  If HostAddress or
+  NumberOfBytes does not fill whole CPU cache lines, the transfer is
+  double-buffered into a cache-line-aligned allocation instead -- running
+  cache maintenance directly on a partial cache line risks corrupting
+  unrelated data sharing that line, the same hazard EmbeddedPkg's
+  NonCoherentDmaLib double-buffers to avoid.
 
   @param[in]     This           Pointer to EDKII_UFS_HOST_CONTROLLER_PROTOCOL.
   @param[in]     Operation      DMA direction.
@@ -62,7 +108,8 @@ UfsMemHcGetMmioBar (
 
   @retval EFI_SUCCESS            Buffer mapped.
   @retval EFI_INVALID_PARAMETER  A required pointer parameter is NULL.
-  @retval EFI_OUT_OF_RESOURCES   Cannot allocate the map-info token.
+  @retval EFI_OUT_OF_RESOURCES   Cannot allocate the map-info token or the
+                                 double-buffer.
 
 **/
 EFI_STATUS
@@ -77,6 +124,12 @@ UfsMemHcMap (
   )
 {
   UFS_MEM_HC_MAP_INFO  *MapInfo;
+  UINT32               Alignment;
+  UINTN                AlignedSize;
+  VOID                 *DmaBuffer;
+
+  AlignedSize = 0;
+  DmaBuffer   = NULL;
 
   if ((This == NULL) || (HostAddress == NULL) || (NumberOfBytes == NULL) ||
       (DeviceAddress == NULL) || (Mapping == NULL))
@@ -94,7 +147,7 @@ UfsMemHcMap (
     return EFI_SUCCESS;
   }
 
-  MapInfo = AllocatePool (sizeof (UFS_MEM_HC_MAP_INFO));
+  MapInfo = AllocateZeroPool (sizeof (UFS_MEM_HC_MAP_INFO));
   if (MapInfo == NULL) {
     return EFI_OUT_OF_RESOURCES;
   }
@@ -103,19 +156,49 @@ UfsMemHcMap (
   MapInfo->NumberOfBytes = *NumberOfBytes;
   MapInfo->Operation     = Operation;
 
-  //
-  // Identity map: the UFS controller and CPU share the same physical address
-  // space on non-IOMMU platforms.
-  //
-  *DeviceAddress = (EFI_PHYSICAL_ADDRESS)(UINTN)HostAddress;
-  *Mapping       = MapInfo;
+  Alignment = UfsMemHcGetDmaBufferAlignment ();
+
+  if ((((UINTN)HostAddress & (Alignment - 1)) != 0) ||
+      ((*NumberOfBytes & (Alignment - 1)) != 0))
+  {
+    //
+    // HostAddress/NumberOfBytes do not fill whole cache lines -- double
+    // buffer into a cache-line-aligned allocation so the WriteBack/Invalidate
+    // below never touches memory outside this transfer.
+    //
+    AlignedSize = ALIGN_VALUE (*NumberOfBytes, Alignment);
+    DmaBuffer   = AllocateAlignedPages (EFI_SIZE_TO_PAGES (AlignedSize), Alignment);
+    if (DmaBuffer == NULL) {
+      FreePool (MapInfo);
+      return EFI_OUT_OF_RESOURCES;
+    }
+
+    if (Operation == EdkiiUfsHcOperationBusMasterRead) {
+      CopyMem (DmaBuffer, HostAddress, *NumberOfBytes);
+    }
+
+    MapInfo->DoubleBuffer  = TRUE;
+    MapInfo->BufferAddress = DmaBuffer;
+    *DeviceAddress         = (EFI_PHYSICAL_ADDRESS)(UINTN)DmaBuffer;
+  } else {
+    //
+    // Identity map: the UFS controller and CPU share the same physical address
+    // space on non-IOMMU platforms.
+    //
+    *DeviceAddress = (EFI_PHYSICAL_ADDRESS)(UINTN)HostAddress;
+  }
+
+  *Mapping = MapInfo;
 
   //
   // Flush CPU write-back cache to DRAM so the DMA engine sees the current
   // buffer contents (required for both read and write DMA directions to avoid
   // a stale dirty line being written back mid-DMA).
   //
-  WriteBackDataCacheRange (HostAddress, *NumberOfBytes);
+  WriteBackDataCacheRange (
+    MapInfo->DoubleBuffer ? MapInfo->BufferAddress : HostAddress,
+    MapInfo->DoubleBuffer ? AlignedSize : *NumberOfBytes
+    );
 
   return EFI_SUCCESS;
 }
@@ -125,7 +208,9 @@ UfsMemHcMap (
 
   For BusMasterWrite (device → host, e.g. READ response data), invalidates the
   cache lines covering the buffer so that the CPU reads DMA-written data from
-  DRAM rather than stale cached content.  Frees the map-info token.
+  DRAM rather than stale cached content.  If Map() double-buffered the
+  transfer (see UfsMemHcMap()), copies the result back into the caller's
+  buffer and frees the double buffer.  Frees the map-info token.
 
   @param[in]  This     Pointer to EDKII_UFS_HOST_CONTROLLER_PROTOCOL.
   @param[in]  Mapping  Token returned by Map().  NULL means CommonBuffer.
@@ -142,6 +227,7 @@ UfsMemHcUnmap (
   )
 {
   UFS_MEM_HC_MAP_INFO  *MapInfo;
+  UINTN                AlignedSize;
 
   if (This == NULL) {
     return EFI_INVALID_PARAMETER;
@@ -154,11 +240,25 @@ UfsMemHcUnmap (
 
   MapInfo = (UFS_MEM_HC_MAP_INFO *)Mapping;
 
-  //
-  // For device-to-host DMA (BusMasterWrite), invalidate the CPU cache lines
-  // covering the buffer so the next CPU read fetches from DRAM.
-  //
-  if (MapInfo->Operation == EdkiiUfsHcOperationBusMasterWrite) {
+  if (MapInfo->DoubleBuffer) {
+    AlignedSize = ALIGN_VALUE (MapInfo->NumberOfBytes, UfsMemHcGetDmaBufferAlignment ());
+
+    //
+    // For device-to-host DMA (BusMasterWrite), invalidate the double buffer's
+    // cache lines so the CopyMem below reads DMA-written data from DRAM, then
+    // copy the result back into the caller's original buffer.
+    //
+    if (MapInfo->Operation == EdkiiUfsHcOperationBusMasterWrite) {
+      InvalidateDataCacheRange (MapInfo->BufferAddress, AlignedSize);
+      CopyMem (MapInfo->HostAddress, MapInfo->BufferAddress, MapInfo->NumberOfBytes);
+    }
+
+    FreeAlignedPages (MapInfo->BufferAddress, EFI_SIZE_TO_PAGES (AlignedSize));
+  } else if (MapInfo->Operation == EdkiiUfsHcOperationBusMasterWrite) {
+    //
+    // For device-to-host DMA (BusMasterWrite), invalidate the CPU cache lines
+    // covering the buffer so the next CPU read fetches from DRAM.
+    //
     InvalidateDataCacheRange (MapInfo->HostAddress, MapInfo->NumberOfBytes);
   }
 

@@ -39,10 +39,18 @@ extern EFI_COMPONENT_NAME2_PROTOCOL  gUfsMemHcComponentName2;
 /// UfsMemHcUnmap().  Tracks the host address and byte count so Unmap() can
 /// perform the correct post-DMA cache maintenance.
 ///
+/// If HostAddress/NumberOfBytes do not fill whole CPU cache lines,
+/// UfsMemHcMap() double-buffers into a cache-line-aligned allocation
+/// (BufferAddress) instead of running cache maintenance directly on the
+/// caller's buffer -- invalidating a partial cache line can otherwise
+/// discard dirty data belonging to unrelated memory sharing that line.
+///
 typedef struct {
   VOID                                   *HostAddress;
   UINTN                                  NumberOfBytes;
   EDKII_UFS_HOST_CONTROLLER_OPERATION    Operation;
+  BOOLEAN                                DoubleBuffer;
+  VOID                                   *BufferAddress;
 } UFS_MEM_HC_MAP_INFO;
 
 ///

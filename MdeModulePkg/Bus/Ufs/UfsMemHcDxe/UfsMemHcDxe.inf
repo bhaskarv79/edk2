@@ -49,6 +49,7 @@
 [Protocols]
   gEdkiiUfsMemHcDeviceProtocolGuid        ## TO_START
   gEdkiiUfsHostControllerProtocolGuid     ## BY_START
+  gEfiCpuArchProtocolGuid                 ## SOMETIMES_CONSUMES
 
 [Depex]
   TRUE
