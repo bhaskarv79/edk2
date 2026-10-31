@@ -102,6 +102,7 @@
 !include MdePkg/MdeLibs.dsc.inc
 
 [LibraryClasses.common]
+  GptLib|MdeModulePkg/Library/GptLib/GptLib.inf
   PlatformSecLib|OvmfPkg/RiscVVirt/Library/PlatformSecLib/PlatformSecLib.inf
 
   # Virtio Support
@@ -432,6 +433,7 @@
   UefiCpuPkg/CpuTimerDxeRiscV64/CpuTimerDxeRiscV64.inf
   OvmfPkg/VirtNorFlashDxe/VirtNorFlashDxe.inf
   MdeModulePkg/Universal/WatchdogTimerDxe/WatchdogTimer.inf
+  MdeModulePkg/Universal/TimestampDxe/TimestampDxe.inf
 
   #
   # Status Code Routing
@@ -450,10 +452,16 @@
       DebugLib|MdePkg/Library/BaseDebugLibNull/BaseDebugLibNull.inf
   }
   OvmfPkg/Fdt/HighMemDxe/HighMemDxe.inf
+  OvmfPkg/IoMmuAbsentDxe/IoMmuAbsentDxe.inf
   OvmfPkg/VirtioBlkDxe/VirtioBlk.inf
   OvmfPkg/VirtioScsiDxe/VirtioScsi.inf
   OvmfPkg/VirtioNetDxe/VirtioNet.inf
   OvmfPkg/VirtioRngDxe/VirtioRng.inf
+
+  #
+  # Hash2 protocol, needed to dispatch TcpDxe
+  #
+  SecurityPkg/Hash2DxeCrypto/Hash2DxeCrypto.inf
 
   #
   # FAT filesystem + GPT/MBR partitioning + UDF filesystem + virtio-fs

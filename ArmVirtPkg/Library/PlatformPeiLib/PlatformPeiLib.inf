@@ -30,6 +30,8 @@
   gArmVirtTokenSpaceGuid.PcdTpm2SupportEnabled
 
 [LibraryClasses]
+  ArmCcaInitPeiLib
+  BaseLib
   BaseMemoryLib
   DebugLib
   HobLib
@@ -37,9 +39,11 @@
   FdtSerialPortAddressLib
   PcdLib
   PeiServicesLib
+  QemuFwCfgSimpleParserLib
 
 [FixedPcd]
   gArmTokenSpaceGuid.PcdFvSize
+  gArmVirtTokenSpaceGuid.PcdSerialDebugPrintErrorLevel
   gUefiOvmfPkgTokenSpaceGuid.PcdDeviceTreeAllocationPadding
 
 [Pcd]

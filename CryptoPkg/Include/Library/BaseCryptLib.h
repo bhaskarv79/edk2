@@ -7,6 +7,7 @@
 Copyright (c) 2009 - 2026, Intel Corporation. All rights reserved.<BR>
 Copyright (c) Microsoft Corporation. All rights reserved.
 (c) Copyright 2026 HP Development Company, L.P.
+Copyright (c) 2026, Arm Limited. All rights reserved.<BR>
 SPDX-License-Identifier: BSD-2-Clause-Patent
 
 **/
@@ -33,6 +34,17 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 
 // ML-DSA
 #define CRYPTO_NID_ML_DSA_87  0x05B3
+
+// SLH-DSA
+#define CRYPTO_NID_SLH_DSA_SHAKE_256S  0x05CD
+
+// Symmetric ciphers usable with Pkcs7Encrypt.
+#define CRYPTO_NID_AES128CBC  0x01A3 // NID_aes_128_cbc
+#define CRYPTO_NID_AES192CBC  0x01A7 // NID_aes_192_cbc
+#define CRYPTO_NID_AES256CBC  0x01AB // NID_aes_256_cbc
+
+// Flags usable with Pkcs7Encrypt and Pkcs7Decrypt.
+#define CRYPTO_PKCS7_DEFAULT  0x0 // Treat the input as binary data.
 
 ///
 /// MD5 digest size in bytes
@@ -2686,6 +2698,109 @@ Pkcs7Verify (
   );
 
 /**
+  Creates a DER-encoded PKCS#7 ContentInfo containing an envelopedData structure
+  that wraps content encrypted for secure transmission to one or more recipients.
+
+  If this interface is not supported, return FALSE.
+
+  @param[in]  X509Stack        Pointer to a stack of X.509 certificates for the
+                               intended recipients of this message, created using
+                               X509ConstructCertificateStack or similar. Each
+                               certificate must provide an RSA public key. Any of the
+                               corresponding private keys will be able to decrypt the
+                               content of the returned ContentInfo.
+  @param[in]  InData           Pointer to the content to be encrypted.
+  @param[in]  InDataSize       Size of the content to be encrypted in bytes.
+  @param[in]  CipherNid        NID of the symmetric cipher to use for encryption.
+                               Supported values are CRYPTO_NID_AES128CBC,
+                               CRYPTO_NID_AES192CBC, and CRYPTO_NID_AES256CBC.
+  @param[in]  Flags            Flags for the encryption operation. Currently only
+                               CRYPTO_PKCS7_DEFAULT is supported, which indicates that
+                               the input data is treated as binary data.
+  @param[out] ContentInfo      Receives a pointer to the output, which is a PKCS#7
+                               DER-encoded ContentInfo that wraps an envelopedData. The
+                               caller must free the returned buffer with FreePool().
+  @param[out] ContentInfoSize  Receives the size of the output in bytes.
+
+  @retval     TRUE             PKCS#7 data encryption succeeded.
+  @retval     FALSE            PKCS#7 data encryption failed.
+  @retval     FALSE            This interface is not supported.
+
+**/
+BOOLEAN
+EFIAPI
+Pkcs7Encrypt (
+  IN   UINT8   *X509Stack,
+  IN   UINT8   *InData,
+  IN   UINTN   InDataSize,
+  IN   UINT32  CipherNid,
+  IN   UINT32  Flags,
+  OUT  UINT8   **ContentInfo,
+  OUT  UINTN   *ContentInfoSize
+  );
+
+/**
+  Decrypts a DER-encoded PKCS#7 ContentInfo containing an envelopedData structure
+  (such as one produced by Pkcs7Encrypt) and recovers the original content.
+
+  The private key is supplied in PEM form so that this interface is not tied to any
+  particular key algorithm (currently supports RSA).
+
+  The correct recipient within the envelopedData is identified automatically. The
+  envelopedData carries, for each recipient, an issuer name and serial number that
+  identify the recipient certificate. If RecipientCert is supplied, its issuer name
+  and serial number are used to select the matching recipient. If RecipientCert is
+  NULL, the supplied private key is tried against every recipient in the envelope.
+
+  If this interface is not supported, return FALSE.
+
+  @param[in]  PemData           Pointer to the PEM-encoded private key of a recipient
+                                of the message. May be an RSA or other supported key
+                                type.
+  @param[in]  PemSize           Size of the PEM key data in bytes.
+  @param[in]  Password          [Optional] NULL-terminated passphrase used to decrypt an
+                                encrypted PEM key. Pass NULL if the PEM key is not
+                                password protected.
+  @param[in]  RecipientCert     [Optional] Pointer to the DER-encoded X.509 certificate
+                                of the recipient whose private key is supplied in
+                                PemData. If provided, it is used to select the matching
+                                recipient in the envelope by issuer name and serial
+                                number. Pass NULL to try the private key against every
+                                recipient.
+  @param[in]  RecipientCertSize Size of the DER-encoded certificate in bytes. Ignored
+                                (and may be 0) when RecipientCert is NULL.
+  @param[in]  ContentInfo       Pointer to the PKCS#7 DER-encoded ContentInfo that wraps
+                                an envelopedData to be decrypted.
+  @param[in]  ContentInfoSize   Size of the ContentInfo in bytes.
+  @param[in]  Flags             Flags for the decryption operation. Currently only
+                                CRYPTO_PKCS7_DEFAULT is supported, which indicates that
+                                the decrypted content is treated as binary data.
+  @param[out] OutData           Receives a pointer to the newly allocated buffer
+                                containing the decrypted content. The caller must free
+                                the returned buffer with FreePool().
+  @param[out] OutDataSize       Receives the size of the decrypted content in bytes.
+
+  @retval     TRUE              PKCS#7 data decryption succeeded.
+  @retval     FALSE             PKCS#7 data decryption failed.
+  @retval     FALSE             This interface is not supported.
+
+**/
+BOOLEAN
+EFIAPI
+Pkcs7Decrypt (
+  IN   CONST UINT8  *PemData,
+  IN   UINTN        PemSize,
+  IN   CONST CHAR8  *Password           OPTIONAL,
+  IN   CONST UINT8  *RecipientCert      OPTIONAL,
+  IN   UINTN        RecipientCertSize   OPTIONAL,
+  IN   CONST UINT8  *ContentInfo,
+  IN   UINTN        ContentInfoSize,
+  IN   UINT32       Flags,
+  OUT  UINT8        **OutData,
+  OUT  UINTN        *OutDataSize
+  );
+
+/**
   This function receives a PKCS7 formatted signature, and then verifies that
   the specified Enhanced or Extended Key Usages (EKU's) are present in the end-entity
   leaf signing certificate.
@@ -3574,6 +3689,85 @@ HkdfSha384Expand (
   IN   UINTN        OutSize
   );
 
+/**
+  Derive SHA512 HMAC-based Extract-and-Expand Key Derivation Function (HKDF).
+
+  @param[in]   Key              Pointer to the user-supplied key.
+  @param[in]   KeySize          Key size in bytes.
+  @param[in]   Salt             Pointer to the salt (non-secret) value.
+  @param[in]   SaltSize         Salt size in bytes.
+  @param[in]   Info             Pointer to the application specific info.
+  @param[in]   InfoSize         Info size in bytes.
+  @param[out]  Out              Pointer to buffer to receive hkdf value.
+  @param[in]   OutSize          Size of hkdf bytes to generate.
+
+  @retval TRUE   Hkdf generated successfully.
+  @retval FALSE  Hkdf generation failed.
+
+**/
+BOOLEAN
+EFIAPI
+HkdfSha512ExtractAndExpand (
+  IN   CONST UINT8  *Key,
+  IN   UINTN        KeySize,
+  IN   CONST UINT8  *Salt,
+  IN   UINTN        SaltSize,
+  IN   CONST UINT8  *Info,
+  IN   UINTN        InfoSize,
+  OUT  UINT8        *Out,
+  IN   UINTN        OutSize
+  );
+
+/**
+  Derive SHA512 HMAC-based Extract key Derivation Function (HKDF).
+
+  @param[in]   Key              Pointer to the user-supplied key.
+  @param[in]   KeySize          key size in bytes.
+  @param[in]   Salt             Pointer to the salt (non-secret) value.
+  @param[in]   SaltSize         salt size in bytes.
+  @param[out]  PrkOut           Pointer to buffer to receive hkdf value.
+  @param[in]   PrkOutSize       size of hkdf bytes to generate.
+
+  @retval TRUE   Hkdf generated successfully.
+  @retval FALSE  Hkdf generation failed.
+
+**/
+BOOLEAN
+EFIAPI
+HkdfSha512Extract (
+  IN CONST UINT8  *Key,
+  IN UINTN        KeySize,
+  IN CONST UINT8  *Salt,
+  IN UINTN        SaltSize,
+  OUT UINT8       *PrkOut,
+  UINTN           PrkOutSize
+  );
+
+/**
+  Derive SHA512 HMAC-based Expand Key Derivation Function (HKDF).
+
+  @param[in]   Prk              Pointer to the user-supplied key.
+  @param[in]   PrkSize          Key size in bytes.
+  @param[in]   Info             Pointer to the application specific info.
+  @param[in]   InfoSize         Info size in bytes.
+  @param[out]  Out              Pointer to buffer to receive hkdf value.
+  @param[in]   OutSize          Size of hkdf bytes to generate.
+
+  @retval TRUE   Hkdf generated successfully.
+  @retval FALSE  Hkdf generation failed.
+
+**/
+BOOLEAN
+EFIAPI
+HkdfSha512Expand (
+  IN   CONST UINT8  *Prk,
+  IN   UINTN        PrkSize,
+  IN   CONST UINT8  *Info,
+  IN   UINTN        InfoSize,
+  OUT  UINT8        *Out,
+  IN   UINTN        OutSize
+  );
+
 // =====================================================================================
 //    Big number primitives
 // =====================================================================================
@@ -4384,6 +4578,62 @@ EcPointsMul (
   );
 
 /**
+  Retrieve the EC Public Key from PEM key data.
+
+  @param[in]  PemData      Pointer to the PEM-encoded key data to be retrieved.
+  @param[in]  PemSize      Size of the PEM key data in bytes.
+  @param[in]  Password     NULL-terminated passphrase used for encrypted
+                           PEM key data.
+  @param[out] EcContext    Pointer to new-generated EC DSA context which
+                           contain the retrieved EC public key component.
+                           Use EcFree() function to free the resource.
+
+  If PemData is NULL, then return FALSE.
+  If EcContext is NULL, then return FALSE.
+
+  @retval  TRUE   EC Public Key was retrieved successfully.
+  @retval  FALSE  Invalid PEM key data or incorrect password.
+
+**/
+BOOLEAN
+EFIAPI
+EcGetPublicKeyFromPem (
+  IN   CONST UINT8  *PemData,
+  IN   UINTN        PemSize,
+  IN   CONST CHAR8  *Password,
+  OUT  VOID         **EcContext
+  );
+
+/**
+  Convert the EC Public Key to PEM key data.
+
+  @param[in]      EcContext   Pointer to EC DSA context.
+  @param[out]     PemData     Pointer to the PEM-encoded key data to be
+                              retrieved.
+  @param[in, out] PemSize     On input, size of PemData in bytes.
+                              On output, size of data returned or required size.
+
+  If EcContext is NULL, then return FALSE.
+  If PemSize is NULL, then return FALSE.
+  If PemData is NULL and *PemSize is zero, then return FALSE and set
+  *PemSize to the required size of the PemData buffer.
+  If PemData is NULL and *PemSize is not zero, then return FALSE.
+  If PemData is not NULL and *PemSize is too small, then return FALSE and
+  set *PemSize to the required size of the PemData buffer.
+
+  @retval  TRUE   EC Public Key was converted to the PEM data successfully.
+  @retval  FALSE  Invalid EC Context.
+
+**/
+BOOLEAN
+EFIAPI
+EcPublicKeyToPEM (
+  IN  VOID      *EcContext,
+  OUT UINT8     *PemData,
+  IN OUT UINTN  *PemSize
+  );
+
+/**
   Calculate the inverse of the supplied EC point.
 
   @param[in]     EcGroup   EC group object.
@@ -4509,6 +4759,23 @@ VOID
 EFIAPI
 EcFree (
   IN  VOID  *EcContext
+  );
+
+/**
+  Return the NID for the Elliptic Curve Context.
+
+  @param[in]  EcContext  Pointer to the EC context.
+  @param[out] Nid        Identifying number for the ECC curve (Defined in
+                         BaseCryptLib.h).
+
+  @retval  TRUE   The NID for the EC key component was retrieved successfully.
+  @retval  FALSE  Invalid EC key component.
+**/
+BOOLEAN
+EFIAPI
+EcGetCurveNid (
+  IN      VOID   *EcContext,
+  OUT     UINTN  *Nid
   );
 
 /**
@@ -5331,4 +5598,259 @@ MlDsaGetPublicKeyFromX509 (
   IN   CONST UINT8  *Cert,
   IN   UINTN        CertSize,
   OUT  VOID         **MlDsaContext
+  );
+
+/**
+  Creates a new SLH-DSA context by Crypto NID.
+
+  This function allocates and initializes a new SLH-DSA context for the specified
+  SLH-DSA variant. The context is created with no key material; the EVP_PKEY
+  structure is set to NULL. The caller must call SlhDsaFree() to release the
+  context when done.
+
+  Before keys can be used for signing or verification, they must be set using
+  SlhDsaSetPrivKey() or SlhDsaSetPubKey().
+
+  If Nid is not a supported SLH-DSA variant, then return NULL.
+  If memory allocation fails, then return NULL.
+
+  @param[in]  Nid   Crypto NID of the SLH-DSA variant (e.g., CRYPTO_NID_SLH_DSA_SHAKE_256S).
+
+  @retval Pointer to new SLH-DSA context if successful.
+  @retval NULL if Nid is unsupported or allocation failed.
+
+**/
+VOID *
+EFIAPI
+SlhDsaNewByNid (
+  IN UINTN  Nid
+  );
+
+/**
+  Frees an SLH-DSA context and all associated resources.
+
+  This function releases all memory associated with the SLH-DSA context, including
+  the EVP_PKEY structure. After calling this function, the SlhDsaContext pointer
+  should not be used.
+
+  If SlhDsaContext is NULL, then this function returns immediately without action.
+
+  @param[in]  SlhDsaContext  Pointer to the SLH-DSA context to be released.
+
+**/
+VOID
+EFIAPI
+SlhDsaFree (
+  IN VOID  *SlhDsaContext
+  );
+
+/**
+  Retrieves the SLH-DSA public key from the SLH-DSA context.
+
+  This function extracts the public key from the SLH-DSA context and copies it to
+  the provided buffer. The public key is returned in raw binary format.
+
+  The context must have a key set (either via SlhDsaSetPrivKey() or SlhDsaSetPubKey())
+  before calling this function.
+
+  If SlhDsaContext is NULL, then return FALSE.
+  If PublicKeySize is NULL, then return FALSE.
+  If the context does not contain a valid key, then return FALSE.
+  If PublicKey buffer is too small, PublicKeySize is updated with required size and return FALSE.
+
+  @param[in]      SlhDsaContext   Pointer to SLH-DSA context containing the key.
+  @param[out]     PublicKey       Pointer to buffer to receive the public key.
+  @param[in,out]  PublicKeySize   On input, size of PublicKey buffer in bytes.
+                                  On output, actual size of public key written.
+
+  @retval TRUE   SLH-DSA public key retrieved successfully.
+  @retval FALSE  Invalid parameters or buffer too small.
+
+**/
+BOOLEAN
+EFIAPI
+SlhDsaGetPubKey (
+  IN      VOID   *SlhDsaContext,
+  OUT     UINT8  *PublicKey,
+  IN OUT  UINTN  *PublicKeySize
+  );
+
+/**
+  Sets the SLH-DSA public key in the SLH-DSA context.
+
+  This function imports a raw public key into the SLH-DSA context. The public key
+  must be in raw binary format (not PEM or DER encoded). The key size must match
+  the expected size for the SLH-DSA variant (64 bytes for SLH-DSA-SHAKE-256s).
+
+  After setting the public key, the context can be used for signature verification
+  but not for signing (which requires the private key).
+
+  If SlhDsaContext is NULL, then return FALSE.
+  If PublicKey is NULL, then return FALSE.
+  If PublicKeySize does not match the expected size for the variant, then return FALSE.
+
+  @param[in]  SlhDsaContext   Pointer to SLH-DSA context created by SlhDsaNewByNid().
+  @param[in]  PublicKey       Pointer to raw public key bytes.
+  @param[in]  PublicKeySize   Size of the public key in bytes.
+
+  @retval TRUE   SLH-DSA public key was set successfully.
+  @retval FALSE  Invalid parameters or key size mismatch.
+
+**/
+BOOLEAN
+EFIAPI
+SlhDsaSetPubKey (
+  IN  VOID   *SlhDsaContext,
+  IN  UINT8  *PublicKey,
+  IN  UINTN  PublicKeySize
+  );
+
+/**
+  Sets the SLH-DSA private key in the SLH-DSA context.
+
+  This function imports a raw private key into the SLH-DSA context. The private key
+  must be in raw binary format (not PEM or DER encoded). The key size must match
+  the expected size for the SLH-DSA variant (128 bytes for SLH-DSA-SHAKE-256s).
+
+  OpenSSL automatically derives the public key from the private key, so after
+  calling this function, both signing and verification operations are possible.
+
+  If SlhDsaContext is NULL, then return FALSE.
+  If PrivateKey is NULL, then return FALSE.
+  If PrivateKeySize does not match the expected size for the variant, then return FALSE.
+
+  @param[in]  SlhDsaContext    Pointer to SLH-DSA context created by SlhDsaNewByNid().
+  @param[in]  PrivateKey       Pointer to raw private key bytes.
+  @param[in]  PrivateKeySize   Size of the private key in bytes.
+
+  @retval TRUE   SLH-DSA private key was set successfully.
+  @retval FALSE  Invalid parameters or key size mismatch.
+
+**/
+BOOLEAN
+EFIAPI
+SlhDsaSetPrivKey (
+  IN  VOID   *SlhDsaContext,
+  IN  UINT8  *PrivateKey,
+  IN  UINTN  PrivateKeySize
+  );
+
+/**
+  Generates and retrieves the public key from a private key context.
+
+  This function extracts the public key from an SLH-DSA context that contains
+  a private key. It is equivalent to calling SlhDsaGetPubKey() but is provided
+  for API consistency with other cryptographic implementations.
+
+  The context must contain a private key (set via SlhDsaSetPrivKey()) before
+  calling this function.
+
+  If SlhDsaContext is NULL, then return FALSE.
+  If PublicKey is NULL, then return FALSE.
+  If PublicKeySize does not match the expected size for the variant, then return FALSE.
+
+  @param[in]   SlhDsaContext   Pointer to SLH-DSA context containing the private key.
+  @param[out]  PublicKey       Pointer to buffer to receive the public key.
+  @param[in]   PublicKeySize   Size of the PublicKey buffer in bytes.
+
+  @retval TRUE   Public key generated and retrieved successfully.
+  @retval FALSE  Invalid parameters or public key extraction failed.
+
+**/
+BOOLEAN
+EFIAPI
+SlhDsaGeneratePubKey (
+  IN  VOID   *SlhDsaContext,
+  OUT UINT8  *PublicKey,
+  IN  UINTN  PublicKeySize
+  );
+
+/**
+  Verifies the SLH-DSA signature for a given message.
+
+  This function verifies an SLH-DSA signature against a message using the public key
+  contained in the SLH-DSA context. An optional context string can be provided which
+  must match the context used during signing.
+
+  The context must contain a key (either public or private) set via SlhDsaSetPrivKey()
+  or SlhDsaSetPubKey() before calling this function.
+
+  If SlhDsaContext is NULL, then return FALSE.
+  If Message is NULL, then return FALSE.
+  If Signature is NULL, then return FALSE.
+  If SigSize is 0 or exceeds INT_MAX, then return FALSE.
+  Context may be NULL if no context string is used.
+
+  @param[in]  SlhDsaContext  Pointer to SLH-DSA context containing the public key.
+  @param[in]  Context        Optional context string for domain separation.
+                             May be NULL for default context.
+  @param[in]  ContextSize    Size of context string in bytes. Set to 0 if Context is NULL.
+  @param[in]  Message        Pointer to the message data to verify.
+  @param[in]  MessageSize    Size of the message in bytes.
+  @param[in]  Signature      Pointer to the SLH-DSA signature to verify.
+  @param[in]  SigSize        Size of the signature in bytes.
+
+  @retval TRUE   SLH-DSA signature verification succeeded.
+  @retval FALSE  SLH-DSA signature verification failed or invalid parameters.
+
+**/
+BOOLEAN
+EFIAPI
+SlhDsaVerify (
+  IN  VOID         *SlhDsaContext,
+  IN  UINT8        *Context,
+  IN  UINTN        ContextSize,
+  IN  CONST UINT8  *Message,
+  IN  UINTN        MessageSize,
+  IN  UINT8        *Signature,
+  IN  UINTN        SigSize
+  );
+
+/**
+  Retrieve the SLH-DSA Private Key from the password-protected PEM key data.
+
+  If PemData is NULL, then return FALSE.
+  If SlhDsaContext is NULL, then return FALSE.
+
+  @param[in]  PemData        Pointer to the PEM-encoded key data to be retrieved.
+  @param[in]  PemSize        Size of the PEM key data in bytes.
+  @param[in]  Password       NULL-terminated passphrase used for encrypted PEM key data.
+  @param[out] SlhDsaContext  Pointer to new-generated SLH-DSA context which contains
+                             the retrieved SLH-DSA private key. Use SlhDsaFree() to free.
+
+  @retval  TRUE   SLH-DSA Private Key was retrieved successfully.
+  @retval  FALSE  Invalid PEM key data or incorrect password.
+
+**/
+BOOLEAN
+EFIAPI
+SlhDsaGetPrivateKeyFromPem (
+  IN   CONST UINT8  *PemData,
+  IN   UINTN        PemSize,
+  IN   CONST CHAR8  *Password,
+  OUT  VOID         **SlhDsaContext
+  );
+
+/**
+  Retrieve the SLH-DSA Public Key from one DER-encoded X509 certificate.
+
+  @param[in]  Cert           Pointer to the DER-encoded X509 certificate.
+  @param[in]  CertSize       Size of the X509 certificate in bytes.
+  @param[out] SlhDsaContext  Pointer to new-generated SLH-DSA context which contain the retrieved
+                             SLH-DSA public key component. Use SlhDsaFree() function to free the
+                             resource.
+
+  If Cert is NULL, then return FALSE.
+  If SlhDsaContext is NULL, then return FALSE.
+
+  @retval  TRUE   SLH-DSA Public Key was retrieved successfully.
+  @retval  FALSE  Fail to retrieve SLH-DSA public key from X509 certificate.
+
+**/
+BOOLEAN
+EFIAPI
+SlhDsaGetPublicKeyFromX509 (
+  IN   CONST UINT8  *Cert,
+  IN   UINTN        CertSize,
+  OUT  VOID         **SlhDsaContext
   );

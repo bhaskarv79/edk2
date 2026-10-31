@@ -12,6 +12,7 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
 #include <Library/DebugLib.h>
 #include <Library/BaseMemoryLib.h>
 #include <Library/DxeHobListLib.h>
+#include <Library/UefiLib.h>
 
 /**
   Returns the pointer to the HOB list.
@@ -35,7 +36,13 @@ GetHobList (
   VOID
   )
 {
-  ASSERT (gHobList != NULL);
+  EFI_STATUS  Status;
+
+  if (gHobList == NULL) {
+    Status = EfiGetSystemConfigurationTable (&gEfiHobListGuid, &gHobList);
+    ASSERT_EFI_ERROR (Status);
+  }
+
   return gHobList;
 }
 
@@ -73,6 +80,36 @@ GetNextHob (
   //
   while (!END_OF_HOB_LIST (Hob)) {
     if (Hob.Header->HobType == Type) {
+      return Hob.Raw;
+    }
+
+    Hob.Raw = GET_NEXT_HOB (Hob);
+  }
+
+  return NULL;
+}
+
+/**
+  Returns the next Resource Descriptor HOB from the starting HOB.
+
+  @param  HobStart      The starting HOB pointer to search from.
+
+  @return The next Resource Descriptor HOB from the starting HOB.
+
+**/
+VOID *
+EFIAPI
+GetNextResourceHob (
+  IN CONST VOID  *HobStart
+  )
+{
+  EFI_PEI_HOB_POINTERS  Hob;
+
+  ASSERT (HobStart != NULL);
+
+  Hob.Raw = (UINT8 *)HobStart;
+  while (!END_OF_HOB_LIST (Hob)) {
+    if (IS_RESOURCE_DESCRIPTOR_HOB (Hob)) {
       return Hob.Raw;
     }
 
@@ -266,6 +303,34 @@ BuildResourceDescriptorWithOwnerHob (
   //
   // PEI HOB is read only for DXE phase
   //
+  ASSERT (FALSE);
+}
+
+/**
+  Builds a HOB that describes a chunk of system memory with memory attributes.
+
+  This function builds a HOB that describes a chunk of system memory.
+  If there is no additional space for HOB creation, then ASSERT().
+
+  @param  ResourceType               The type of resource described by this HOB.
+  @param  ResourceCapabilities       The resource capabilities of the memory described by this HOB.
+  @param  PhysicalStart              The 64 bit physical address of memory described by this HOB.
+  @param  ResourceLength             The length of the memory described by this HOB in bytes.
+  @param  ResourceMemoryAttributes   The memory attribute for the memory described by this HOB.
+  @param  OwnerGuid                  GUID for the owner of this resource.
+
+**/
+VOID
+EFIAPI
+BuildResourceDescriptor2Hob (
+  IN EFI_RESOURCE_TYPE            ResourceType,
+  IN EFI_RESOURCE_ATTRIBUTE_TYPE  ResourceCapabilities,
+  IN EFI_PHYSICAL_ADDRESS         PhysicalStart,
+  IN UINT64                       ResourceLength,
+  IN UINT64                       ResourceMemoryAttributes,
+  IN EFI_GUID                     *OwnerGuid OPTIONAL
+  )
+{
   ASSERT (FALSE);
 }
 

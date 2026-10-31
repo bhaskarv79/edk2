@@ -13,7 +13,7 @@
   PLATFORM_VERSION        = 0.1
   DSC_SPECIFICATION       = 0x00010005
   OUTPUT_DIRECTORY        = Build/MdeModulePkg/HostTest
-  SUPPORTED_ARCHITECTURES = IA32|X64
+  SUPPORTED_ARCHITECTURES = IA32|X64|AARCH64
   BUILD_TARGETS           = NOOPT
   SKUID_IDENTIFIER        = DEFAULT
 
@@ -65,6 +65,10 @@
       NvmExpressDxe|MdeModulePkg/Bus/Pci/NvmExpressDxe/NvmExpressDxe.inf
   }
 
+  MdeModulePkg/Bus/Pci/PciBusDxe/GoogleTest/PciBusDxeGoogleTest.inf
+
+  MdeModulePkg/Bus/Usb/UsbBusDxe/GoogleTest/UsbBusDxeGoogleTest.inf
+
   MdeModulePkg/Library/DxeReportStatusCodeLib/GoogleTest/DxeReportStatusCodeLibGoogleTest.inf {
     <LibraryClasses>
       ReportStatusCodeLib|MdeModulePkg/Library/DxeReportStatusCodeLib/DxeReportStatusCodeLib.inf
@@ -75,6 +79,16 @@
   MdeModulePkg/Core/Dxe/Mem/GoogleTest/MemoryBinGoogleTestHost.inf {
     <LibraryClasses>
       HobLib|MdePkg/Test/Mock/Library/GoogleTest/MockHobLib/MockHobLib.inf
+  }
+
+  MdeModulePkg/Core/Pei/PeiMemoryServicesGoogleTestHost.inf {
+    <LibraryClasses>
+      HobLib|MdePkg/Test/Mock/Library/GoogleTest/MockHobLib/MockHobLib.inf
+  }
+
+  MdeModulePkg/Library/GptLib/UnitTest/GptLibUnitTestHost.inf {
+    <LibraryClasses>
+      GptLib|MdeModulePkg/Library/GptLib/GptLib.inf
   }
 
   #

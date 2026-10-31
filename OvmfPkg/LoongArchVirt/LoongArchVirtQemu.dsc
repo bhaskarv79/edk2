@@ -19,9 +19,11 @@
   DSC_SPECIFICATION              = 1.29
   OUTPUT_DIRECTORY               = Build/$(PLATFORM_NAME)
   SUPPORTED_ARCHITECTURES        = LOONGARCH64
-  BUILD_TARGETS                  = DEBUG|RELEASE
+  BUILD_TARGETS                  = DEBUG|RELEASE|NOOPT
   SKUID_IDENTIFIER               = DEFAULT
   FLASH_DEFINITION               = OvmfPkg/LoongArchVirt/LoongArchVirtQemu.fdf
+
+  DEFINE CUSTOM_STACK_CHECK_LIB = DYNAMIC
 
 !include LoongArchVirt.fdf.inc
 
@@ -98,6 +100,7 @@
 !include MdePkg/MdeLibs.dsc.inc
 
 [LibraryClasses.common]
+  GptLib|MdeModulePkg/Library/GptLib/GptLib.inf
   PcdLib                           | MdePkg/Library/DxePcdLib/DxePcdLib.inf
   TimerLib                         | UefiCpuPkg/Library/CpuTimerLib/BaseCpuTimerLib.inf
   PrintLib                         | MdePkg/Library/BasePrintLib/BasePrintLib.inf
@@ -140,8 +143,10 @@
   UefiLib                          | MdePkg/Library/UefiLib/UefiLib.inf
   UefiBootServicesTableLib         | MdePkg/Library/UefiBootServicesTableLib/UefiBootServicesTableLib.inf
   UefiRuntimeServicesTableLib      | MdePkg/Library/UefiRuntimeServicesTableLib/UefiRuntimeServicesTableLib.inf
+!if $(CUSTOM_STACK_CHECK_LIB) != DYNAMIC
   UefiDriverEntryPoint             | MdePkg/Library/UefiDriverEntryPoint/UefiDriverEntryPoint.inf
   UefiApplicationEntryPoint        | MdePkg/Library/UefiApplicationEntryPoint/UefiApplicationEntryPoint.inf
+!endif
   DevicePathLib                    | MdePkg/Library/UefiDevicePathLibDevicePathProtocol/UefiDevicePathLibDevicePathProtocol.inf
   FileHandleLib                    | MdePkg/Library/UefiFileHandleLib/UefiFileHandleLib.inf
   SecurityManagementLib            | MdeModulePkg/Library/DxeSecurityManagementLib/DxeSecurityManagementLib.inf
@@ -263,7 +268,7 @@
   ReportStatusCodeLib              | MdeModulePkg/Library/PeiReportStatusCodeLib/PeiReportStatusCodeLib.inf
   OemHookStatusCodeLib             | MdeModulePkg/Library/OemHookStatusCodeLibNull/OemHookStatusCodeLibNull.inf
   PeCoffGetEntryPointLib           | MdePkg/Library/BasePeCoffGetEntryPointLib/BasePeCoffGetEntryPointLib.inf
-  PeiResourcePublicationLib        | MdePkg/Library/PeiResourcePublicationLib/PeiResourcePublicationLib.inf
+  ResourcePublicationLib           | MdePkg/Library/PeiResourcePublicationLib/PeiResourcePublicationLib.inf
   ExtractGuidedSectionLib          | MdePkg/Library/PeiExtractGuidedSectionLib/PeiExtractGuidedSectionLib.inf
   PcdLib                           | MdePkg/Library/PeiPcdLib/PeiPcdLib.inf
   QemuFwCfgS3Lib                   | OvmfPkg/Library/QemuFwCfgS3Lib/PeiQemuFwCfgS3LibFwCfg.inf
@@ -279,7 +284,9 @@
 
 [LibraryClasses.common.DXE_CORE]
   HobLib                           | MdePkg/Library/DxeCoreHobLib/DxeCoreHobLib.inf
+!if $(CUSTOM_STACK_CHECK_LIB) != DYNAMIC
   DxeCoreEntryPoint                | MdePkg/Library/DxeCoreEntryPoint/DxeCoreEntryPoint.inf
+!endif
   MemoryAllocationLib              | MdeModulePkg/Library/DxeCoreMemoryAllocationLib/DxeCoreMemoryAllocationLib.inf
   ReportStatusCodeLib              | MdeModulePkg/Library/DxeReportStatusCodeLib/DxeReportStatusCodeLib.inf
   PciPcdProducerLib                | OvmfPkg/Fdt/FdtPciPcdProducerLib/FdtPciPcdProducerLib.inf
@@ -289,7 +296,9 @@
 [LibraryClasses.common.DXE_RUNTIME_DRIVER]
   PcdLib                           | MdePkg/Library/DxePcdLib/DxePcdLib.inf
   HobLib                           | MdePkg/Library/DxeHobLib/DxeHobLib.inf
+!if $(CUSTOM_STACK_CHECK_LIB) != DYNAMIC
   DxeCoreEntryPoint                | MdePkg/Library/DxeCoreEntryPoint/DxeCoreEntryPoint.inf
+!endif
   MemoryAllocationLib              | MdePkg/Library/UefiMemoryAllocationLib/UefiMemoryAllocationLib.inf
   ReportStatusCodeLib              | MdeModulePkg/Library/RuntimeDxeReportStatusCodeLib/RuntimeDxeReportStatusCodeLib.inf
   UefiRuntimeLib                   | MdePkg/Library/UefiRuntimeLib/UefiRuntimeLib.inf
@@ -309,7 +318,9 @@
 [LibraryClasses.common.UEFI_DRIVER]
   PcdLib                           | MdePkg/Library/DxePcdLib/DxePcdLib.inf
   HobLib                           | MdePkg/Library/DxeHobLib/DxeHobLib.inf
+!if $(CUSTOM_STACK_CHECK_LIB) != DYNAMIC
   DxeCoreEntryPoint                | MdePkg/Library/DxeCoreEntryPoint/DxeCoreEntryPoint.inf
+!endif
   PerformanceLib                   | MdeModulePkg/Library/DxePerformanceLib/DxePerformanceLib.inf
   MemoryAllocationLib              | MdePkg/Library/UefiMemoryAllocationLib/UefiMemoryAllocationLib.inf
   ReportStatusCodeLib              | MdeModulePkg/Library/DxeReportStatusCodeLib/DxeReportStatusCodeLib.inf
@@ -331,6 +342,7 @@
   QemuFwCfgLib                     | OvmfPkg/Library/QemuFwCfgLib/QemuFwCfgMmioDxeLib.inf
   PciPcdProducerLib                | OvmfPkg/Fdt/FdtPciPcdProducerLib/FdtPciPcdProducerLib.inf
   AcpiPlatformLib                  | OvmfPkg/Library/AcpiPlatformLib/DxeAcpiPlatformLib.inf
+  MapMmioLib                       | OvmfPkg/Library/MapMmioLib/MapMmioLib.inf
   MpInitLib                        | UefiCpuPkg/Library/MpInitLib/DxeMpInitLib.inf
 !if $(TPM2_ENABLE) == TRUE
   Tpm2DeviceLib|SecurityPkg/Library/Tpm2DeviceLibTcg2/Tpm2DeviceLibTcg2.inf
@@ -390,6 +402,12 @@
   gEfiMdeModulePkgTokenSpaceGuid.PcdVpdBaseAddress                     | 0x0
   gEfiMdePkgTokenSpaceGuid.PcdPerformanceLibraryPropertyMask           | 0x1
   gEfiMdePkgTokenSpaceGuid.PcdReportStatusCodePropertyMask             | 0x07
+
+  #
+  # Because there are many drivers or physical device drivers, more memory is needed to
+  # store the BootRecord.
+  #
+  gEfiMdeModulePkgTokenSpaceGuid.PcdExtFpdtBootRecordPadSize           | 0x100000
 
   # Use MMIO for accessing Serial port registers.
   gEfiMdeModulePkgTokenSpaceGuid.PcdSerialUseMmio                      | TRUE
@@ -516,6 +534,9 @@
   gEfiSecurityPkgTokenSpaceGuid.PcdTpm2HashMask|0
 !endif
 
+  # Define PCD for emulating runtime variable storage when CFI flash is absent
+  gEfiMdeModulePkgTokenSpaceGuid.PcdEmuVariableNvModeEnable             |FALSE
+
 [PcdsDynamicHii]
   gEfiMdePkgTokenSpaceGuid.PcdPlatformBootTimeOut|L"Timeout"|gEfiGlobalVariableGuid|0x0|3
 !if $(TPM2_CONFIG_ENABLE) == TRUE
@@ -598,6 +619,7 @@
       CpuMmuLib | UefiCpuPkg/Library/CpuMmuLib/CpuMmuLib.inf
   }
   MdeModulePkg/Universal/WatchdogTimerDxe/WatchdogTimer.inf
+  MdeModulePkg/Universal/TimestampDxe/TimestampDxe.inf
   MdeModulePkg/Universal/MonotonicCounterRuntimeDxe/MonotonicCounterRuntimeDxe.inf
   MdeModulePkg/Universal/CapsuleRuntimeDxe/CapsuleRuntimeDxe.inf
 !if $(SECURE_BOOT_ENABLE) == TRUE
@@ -643,9 +665,15 @@
   #
   # Platform Driver
   #
+  OvmfPkg/IoMmuAbsentDxe/IoMmuAbsentDxe.inf
   OvmfPkg/VirtioBlkDxe/VirtioBlk.inf
   OvmfPkg/VirtioScsiDxe/VirtioScsi.inf
   OvmfPkg/VirtioRngDxe/VirtioRng.inf
+
+  #
+  # Hash2 protocol, needed to dispatch TcpDxe
+  #
+  SecurityPkg/Hash2DxeCrypto/Hash2DxeCrypto.inf
 
   #
   # FAT filesystem + GPT/MBR partitioning + UDF filesystem + virtio-fs
@@ -797,10 +825,6 @@
 !include OvmfPkg/Include/Dsc/ShellComponents.dsc.inc
 
   MdeModulePkg/Universal/Acpi/FirmwarePerformanceDataTableDxe/FirmwarePerformanceDxe.inf
-  ShellPkg/DynamicCommand/DpDynamicCommand/DpDynamicCommand.inf {
-    <PcdsFixedAtBuild>
-      gEfiShellPkgTokenSpaceGuid.PcdShellLibAutoInitialize|FALSE
-  }
 
   #
   # TPM2 support

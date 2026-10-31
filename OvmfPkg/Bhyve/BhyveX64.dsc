@@ -125,6 +125,7 @@
 !include MdePkg/MdeLibs.dsc.inc
 
 [LibraryClasses]
+  GptLib|MdeModulePkg/Library/GptLib/GptLib.inf
   SmmRelocationLib|OvmfPkg/Library/SmmRelocationLib/SmmRelocationLib.inf
   PcdLib|MdePkg/Library/BasePcdLibNull/BasePcdLibNull.inf
   TimerLib|OvmfPkg/Library/AcpiTimerLib/BaseAcpiTimerLibBhyve.inf
@@ -722,8 +723,9 @@
   OvmfPkg/VirtioBlkDxe/VirtioBlk.inf
   OvmfPkg/VirtioScsiDxe/VirtioScsi.inf
   OvmfPkg/VirtioSerialDxe/VirtioSerial.inf
-  OvmfPkg/VirtioKeyboardDxe/VirtioKeyboard.inf
+  OvmfPkg/VirtioInputDxe/VirtioInput.inf
   MdeModulePkg/Universal/WatchdogTimerDxe/WatchdogTimer.inf
+  MdeModulePkg/Universal/TimestampDxe/TimestampDxe.inf
   MdeModulePkg/Universal/MonotonicCounterRuntimeDxe/MonotonicCounterRuntimeDxe.inf
   MdeModulePkg/Universal/CapsuleRuntimeDxe/CapsuleRuntimeDxe.inf
   MdeModulePkg/Universal/Console/ConPlatformDxe/ConPlatformDxe.inf
@@ -761,7 +763,7 @@
 
   OvmfPkg/Bhyve/BhyveRfbDxe/BhyveRfbDxe.inf {
     <LibraryClasses>
-      BltLib|MdeModulePkg/Library/FrameBufferBltLib/FrameBufferBltLib.inf
+      FrameBufferBltLib|MdeModulePkg/Library/FrameBufferBltLib/FrameBufferBltLib.inf
       PcdLib|MdePkg/Library/DxePcdLib/DxePcdLib.inf
   }
 
