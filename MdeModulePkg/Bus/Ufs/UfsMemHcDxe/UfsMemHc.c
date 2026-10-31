@@ -356,8 +356,9 @@ UfsMemHcFlush (
 
   @param[in]     This    Pointer to EDKII_UFS_HOST_CONTROLLER_PROTOCOL.
   @param[in]     Width   Register width (only EfiUfsHcWidthUint32 supported).
-  @param[in]     Offset  Byte offset from the HCI MMIO base.
-  @param[in]     Count   Number of register reads to perform.
+  @param[in]     Offset  Byte offset from the HCI MMIO base of the first register.
+  @param[in]     Count   Number of consecutive 32-bit registers to read, starting
+                         at Offset and advancing by sizeof(UINT32) each iteration.
   @param[in,out] Buffer  Destination buffer for read data.
 
   @retval EFI_SUCCESS            Data read.
@@ -390,7 +391,10 @@ UfsMemHcMmioRead (
 
   for (Index = 0; Index < Count; Index++) {
     *((UINT32 *)Buffer + Index) =
-      MmioRead32 ((UINTN)Private->DevProtocol->HciMmioBase + (UINTN)Offset);
+      MmioRead32 (
+        (UINTN)Private->DevProtocol->HciMmioBase + (UINTN)Offset +
+        Index * sizeof (UINT32)
+        );
   }
 
   return EFI_SUCCESS;
@@ -401,8 +405,9 @@ UfsMemHcMmioRead (
 
   @param[in]     This    Pointer to EDKII_UFS_HOST_CONTROLLER_PROTOCOL.
   @param[in]     Width   Register width (only EfiUfsHcWidthUint32 supported).
-  @param[in]     Offset  Byte offset from the HCI MMIO base.
-  @param[in]     Count   Number of register writes to perform.
+  @param[in]     Offset  Byte offset from the HCI MMIO base of the first register.
+  @param[in]     Count   Number of consecutive 32-bit registers to write, starting
+                         at Offset and advancing by sizeof(UINT32) each iteration.
   @param[in,out] Buffer  Source buffer of values to write.
 
   @retval EFI_SUCCESS            Data written.
@@ -435,7 +440,8 @@ UfsMemHcMmioWrite (
 
   for (Index = 0; Index < Count; Index++) {
     MmioWrite32 (
-      (UINTN)Private->DevProtocol->HciMmioBase + (UINTN)Offset,
+      (UINTN)Private->DevProtocol->HciMmioBase + (UINTN)Offset +
+      Index * sizeof (UINT32),
       *((UINT32 *)Buffer + Index)
       );
   }
