@@ -271,17 +271,23 @@ UfsMemHcUnmap (
 
   Uncached mapping ensures the UFS DMA engine and the CPU always see the same
   view of UTRL/UPIU descriptor memory without requiring explicit cache
-  maintenance at every doorbell ring.
+  maintenance at every doorbell ring.  This implementation always produces an
+  EFI_MEMORY_UC buffer and does not implement the optional
+  MEMORY_WRITE_COMBINE / MEMORY_CACHED attributes the protocol allows a
+  caller to request; a non-zero Attributes is rejected rather than silently
+  honoring the default UC behavior instead of what was actually requested.
 
   @param[in]  This         Pointer to EDKII_UFS_HOST_CONTROLLER_PROTOCOL.
   @param[in]  Type         Allocation type (not used; AllocateAnyPages assumed).
   @param[in]  MemoryType   EfiBootServicesData or EfiRuntimeServicesData.
   @param[in]  Pages        Number of 4 KiB pages to allocate.
   @param[out] HostAddress  Receives the host virtual address of the allocation.
-  @param[in]  Attributes   Requested memory attributes (informational only).
+  @param[in]  Attributes   Must be 0; MEMORY_WRITE_COMBINE/MEMORY_CACHED are
+                           not implemented by this driver.
 
   @retval EFI_SUCCESS            Pages allocated and remapped UC.
   @retval EFI_INVALID_PARAMETER  HostAddress is NULL or MemoryType is invalid.
+  @retval EFI_UNSUPPORTED        Attributes is non-zero.
   @retval EFI_OUT_OF_RESOURCES   AllocatePages failed.
   @retval EFI_DEVICE_ERROR       Buffer could not be remapped uncached; the
                                  caller's CommonBuffer Map/Unmap path assumes
@@ -313,6 +319,16 @@ UfsMemHcAllocateBuffer (
       (MemoryType != EfiRuntimeServicesData))
   {
     return EFI_INVALID_PARAMETER;
+  }
+
+  if (Attributes != 0) {
+    DEBUG ((
+      DEBUG_ERROR,
+      "[UfsMemHc] AllocateBuffer: Attributes=0x%lx not supported; this driver "
+      "only produces EFI_MEMORY_UC common buffers\n",
+      Attributes
+      ));
+    return EFI_UNSUPPORTED;
   }
 
   Address = MAX_UINT64;
