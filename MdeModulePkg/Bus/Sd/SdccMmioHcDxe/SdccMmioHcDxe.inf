@@ -1,0 +1,55 @@
+## @file
+#  Generic Qualcomm SDCC5 MMIO SDHCI Host Controller DXE driver.
+#
+#  Produces EFI_SD_MMC_PASS_THRU_PROTOCOL for any SDCC5 controller mapped
+#  as MMIO.  Supports eMMC (HS400-ES/HS400/HS200/HS) and SD card.
+#  Platform-specific configuration (clock frequencies, DLL tuning, GPIO) is
+#  supplied via the SdccPlatformLib library class.
+#
+#  No PCI IO, NonDiscoverable, or SdMmcPciHcDxe is required.
+#
+#  Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = SdccMmioHcDxe
+  FILE_GUID                      = 7F6A1B3C-4D8E-49F0-B2A7-C3E5D1F09821
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = SdccMmioHcDxeEntryPoint
+
+[Sources.common]
+  SdccMmioHcDxe.c
+  SdccMmioHcDxe.h
+  SdccMmioHci.c
+  SdccMmioPassThru.c
+  SdccMmioEmmcMode.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+
+[LibraryClasses]
+  UefiDriverEntryPoint
+  UefiBootServicesTableLib
+  DxeServicesTableLib
+  BaseMemoryLib
+  BaseLib
+  UefiLib
+  DebugLib
+  MemoryAllocationLib
+  IoLib
+  TimerLib
+  DevicePathLib
+  CacheMaintenanceLib
+  SdccPlatformLib
+
+[Protocols]
+  gEfiSdMmcPassThruProtocolGuid        ## PRODUCES
+  gEfiDevicePathProtocolGuid           ## PRODUCES
+  gEfiSdccHcRcaProtocolGuid            ## PRODUCES
+
+[Depex]
+  TRUE

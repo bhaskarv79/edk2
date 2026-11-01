@@ -35,6 +35,9 @@
   ##  @libraryclass  Provides GPT partition table parsing and validation routines.
   GptLib|Include/Library/GptLib.h
 
+  ##  @libraryclass  Platform-specific configuration interface for SdccMmioHcDxe.
+  SdccPlatformLib|Include/Library/SdccPlatformLib.h
+
   ##  @libraryclass  Defines a set of methods to reset whole system.
   ResetSystemLib|Include/Library/ResetSystemLib.h
 
@@ -694,6 +697,9 @@
 
   ## Include/Protocol/UfsHostControllerPlatform.h
   gEdkiiUfsHcPlatformProtocolGuid = { 0x3d18ba13, 0xd9b1, 0x4dd4, {0xb9, 0x16, 0xd3, 0x07, 0x96, 0x53, 0x9e, 0xd8}}
+
+  ## Bus/Sd/SdccMmioHcDxe/SdccMmioHcDxe.h
+  gEfiSdccHcRcaProtocolGuid = { 0xB7C3D4E5, 0xF6A7, 0x48B9, { 0xC0, 0xD1, 0xE2, 0xF3, 0xA4, 0xB5, 0xC6, 0xD7 } }
 
   ## Include/Protocol/EsrtManagement.h
   gEsrtManagementProtocolGuid         = { 0xa340c064, 0x723c, 0x4a9c, { 0xa4, 0xdd, 0xd5, 0xb4, 0x7a, 0x26, 0xfb, 0xb0 }}

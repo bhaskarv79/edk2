@@ -248,6 +248,7 @@
   MdeModulePkg/Bus/Sd/SdBlockIoPei/SdBlockIoPei.inf
   MdeModulePkg/Bus/Sd/EmmcDxe/EmmcDxe.inf
   MdeModulePkg/Bus/Sd/SdDxe/SdDxe.inf
+  MdeModulePkg/Bus/Sd/SdccMmioHcDxe/SdccMmioHcDxe.inf
   MdeModulePkg/Bus/Pci/UfsPciHcDxe/UfsPciHcDxe.inf
   MdeModulePkg/Bus/Ufs/UfsPassThruDxe/UfsPassThruDxe.inf
   MdeModulePkg/Bus/Pci/UfsPciHcPei/UfsPciHcPei.inf
