@@ -193,45 +193,60 @@ DiscoverUserArea (
   UINT32      CSizeMul;
   UINT32      ReadBlLen;
 
+  DEBUG ((DEBUG_WARN, "[SdDxe] DiscoverUserArea enter\n"));
   //
   // Deselect the device to force it enter stby mode.
   // Note here we don't judge return status as some SD devices return
   // error but the state has been stby.
   //
-  SdSelect (Device, 0);
+  Status = SdSelect (Device, 0);
+  DEBUG ((DEBUG_WARN, "[SdDxe] DiscoverUserArea: CMD7(0) deselect Status=%r\n", Status));
 
+  DEBUG ((DEBUG_WARN, "[SdDxe] DiscoverUserArea: CMD3 (SetRca) start\n"));
   Status = SdSetRca (Device, &Rca);
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "DiscoverUserArea(): Assign new Rca = 0x%x fails with %r\n", Rca, Status));
     return Status;
   }
+  DEBUG ((DEBUG_WARN, "[SdDxe] DiscoverUserArea: CMD3 OK Rca=0x%x\n", Rca));
 
   Csd    = &Device->Csd;
+  DEBUG ((DEBUG_WARN, "[SdDxe] DiscoverUserArea: CMD9 (GetCsd) start Rca=0x%x\n", Rca));
   Status = SdGetCsd (Device, Rca, Csd);
   if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "DiscoverUserArea(): GetCsd Rca=0x%x fails with %r\n", Rca, Status));
     return Status;
   }
+  DEBUG ((DEBUG_WARN, "[SdDxe] DiscoverUserArea: CMD9 OK\n"));
 
   DumpCsd (Csd);
 
   Cid    = &Device->Cid;
+  DEBUG ((DEBUG_WARN, "[SdDxe] DiscoverUserArea: CMD10 (GetCid) start Rca=0x%x\n", Rca));
   Status = SdGetCid (Device, Rca, Cid);
   if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "DiscoverUserArea(): GetCid Rca=0x%x fails with %r\n", Rca, Status));
     return Status;
   }
+  DEBUG ((DEBUG_WARN, "[SdDxe] DiscoverUserArea: CMD10 OK\n"));
 
   GetSdModelName (Device, Cid);
 
+  DEBUG ((DEBUG_WARN, "[SdDxe] DiscoverUserArea: CMD7(Rca=0x%x) select start\n", Rca));
   Status = SdSelect (Device, Rca);
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_ERROR, "DiscoverUserArea(): Reselect the device 0x%x fails with %r\n", Rca, Status));
     return Status;
   }
+  DEBUG ((DEBUG_WARN, "[SdDxe] DiscoverUserArea: CMD7 select OK\n"));
 
+  DEBUG ((DEBUG_WARN, "[SdDxe] DiscoverUserArea: CMD13 (SendStatus) start Rca=0x%x\n", Rca));
   Status = SdSendStatus (Device, Rca, &DevStatus);
   if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "DiscoverUserArea(): SendStatus Rca=0x%x fails with %r\n", Rca, Status));
     return Status;
   }
+  DEBUG ((DEBUG_WARN, "[SdDxe] DiscoverUserArea: CMD13 OK DevStatus=0x%x\n", DevStatus));
 
   if (Csd->CsdStructure == 0) {
     Device->SectorAddressing = FALSE;
@@ -255,6 +270,16 @@ DiscoverUserArea (
   Device->BlockMedia.MediaPresent     = TRUE;
   Device->BlockMedia.LogicalPartition = FALSE;
   Device->BlockMedia.LastBlock        = DivU64x32 (Capacity, Device->BlockMedia.BlockSize) - 1;
+
+  DEBUG ((DEBUG_WARN,
+          "[SdDxe] SD card detected: RCA=0x%x CSDv%d SectorAddr=%d "
+          "Capacity=%dMiB LastBlock=0x%lx Model=%s\n",
+          Rca,
+          Csd->CsdStructure + 1,
+          Device->SectorAddressing,
+          (UINT32)DivU64x32 (Capacity, 1024 * 1024),
+          Device->BlockMedia.LastBlock,
+          Device->ModelName));
 
   if (Csd->EraseBlkEn) {
     Device->EraseBlock.EraseLengthGranularity = 1;
@@ -313,9 +338,13 @@ DiscoverSdDevice (
   }
 
   if (DevicePath->SubType != MSG_SD_DP) {
+    DEBUG ((DEBUG_INFO, "[SdDxe] DiscoverSdDevice: SubType=0x%x != MSG_SD_DP\n",
+            DevicePath->SubType));
     Status = EFI_UNSUPPORTED;
     goto Error;
   }
+
+  DEBUG ((DEBUG_WARN, "[SdDxe] DiscoverSdDevice: DevicePath OK, calling DiscoverUserArea\n"));
 
   NewDevicePath = AppendDevicePathNode (
                     Private->ParentDevicePath,
@@ -334,6 +363,7 @@ DiscoverSdDevice (
     //
     // The device has been started, directly return to fast boot.
     //
+    DEBUG ((DEBUG_WARN, "[SdDxe] DiscoverSdDevice: already started\n"));
     Status = EFI_ALREADY_STARTED;
     goto Error;
   }
@@ -359,6 +389,7 @@ DiscoverSdDevice (
   if (EFI_ERROR (Status)) {
     goto Error;
   }
+  DEBUG ((DEBUG_WARN, "[SdDxe] DiscoverSdDevice: DiscoverUserArea OK — installing protocols\n"));
 
   Device->ControllerNameTable = NULL;
   AddUnicodeString2 (
@@ -390,6 +421,8 @@ DiscoverSdDevice (
                   &Device->DiskInfo,
                   NULL
                   );
+  DEBUG ((DEBUG_WARN, "[SdDxe] DiscoverSdDevice: InstallProtocols Status=%r Handle=0x%p\n",
+          Status, Device->Handle));
 
   if (!EFI_ERROR (Status)) {
     gBS->OpenProtocol (
@@ -471,6 +504,7 @@ SdDxeDriverBindingSupported (
   EFI_SD_MMC_PASS_THRU_PROTOCOL  *PassThru;
   UINT8                          Slot;
 
+  DEBUG ((DEBUG_VERBOSE, "[SdDxe] Supported Controller=%p\n", Controller));
   //
   // Test EFI_SD_MMC_PASS_THRU_PROTOCOL on the controller handle.
   //
@@ -531,6 +565,7 @@ SdDxeDriverBindingSupported (
                   Controller,
                   EFI_OPEN_PROTOCOL_GET_PROTOCOL
                   );
+  DEBUG ((DEBUG_VERBOSE, "[SdDxe] Supported Controller=%p returns %r\n", Controller, Status));
   return Status;
 }
 
@@ -583,6 +618,7 @@ SdDxeDriverBindingStart (
   SD_DRIVER_PRIVATE_DATA         *Private;
   UINT8                          Slot;
 
+  DEBUG ((DEBUG_WARN, "[SdDxe] Start Controller=%p\n", Controller));
   Private  = NULL;
   PassThru = NULL;
   Status   = gBS->OpenProtocol (
