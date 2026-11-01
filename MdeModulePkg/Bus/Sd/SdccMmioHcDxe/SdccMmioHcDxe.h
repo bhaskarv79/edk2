@@ -14,8 +14,12 @@
 #define __SDCC_MMIO_HC_DXE_H__
 
 #include <Uefi.h>
+#include <IndustryStandard/Sd.h>
 #include <Protocol/SdMmcPassThru.h>
 #include <Protocol/DevicePath.h>
+#include <Protocol/DriverBinding.h>
+#include <Protocol/ComponentName.h>
+#include <Protocol/ComponentName2.h>
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/DxeServicesTableLib.h>
 #include <Library/BaseMemoryLib.h>
@@ -56,28 +60,16 @@
 #define SDCC_HC_ADMA_SYS_ADDR       0x58u
 #define SDCC_HC_CTRL_VER            0xFEu
 
-// ─── Qualcomm SDCC5 Vendor-Specific Register Offsets ─────────────────────────
-// Ref: Qualcomm SDCC5 HPG / ipcat PERIPH_SS_SDC1_SDCC_SDCC5_HC
+// ─── PWRCTL block ────────────────────────────────────────────────────────────
+// Ref: Qualcomm SDCC5 HPG §7.3.8 (power control interrupt handshake).  Not
+// part of the SDHCI Simplified Specification, but SdccHcReset()/ColdInit()
+// need it directly (unlike the DLL/mux vendor registers, which are fully
+// encapsulated behind SdccPlatformLib and never touched here).
 
-#define SDCC_HC_VS_DLL_CONFIG       0x200u  ///< DLL control; RST[30],PDN[29],DLL_EN[16],CK_OUT_EN[18]
-#define SDCC_HC_VS_DLL_TEST_CTL     0x204u
-#define SDCC_HC_VS_DLL_STATUS       0x208u  ///< DLL_LOCK[7], DDR_DLL_LOCK_JDR[11]
-#define SDCC_HC_VS_FUNC             0x20Cu  ///< HC_SELECT_IN[21:19], HC_SELECT_IN_EN[18], PWRSAVE[1]
-#define SDCC_HC_VS_FUNC2            0x210u  ///< AXI transaction attributes
-#define SDCC_HC_VS_ADMA_ERR_ADDR0   0x214u
-#define SDCC_HC_VS_CAPS0            0x21Cu  ///< Shadow CAP1: BaseClk[15:8], 8BIT[18], HS[21]
-#define SDCC_HC_VS_CAPS1            0x220u  ///< Shadow CAP2: HS400[3], DDR50[2], SDR104[1]
-#define SDCC_HC_VS_DDR200_CFG       0x224u  ///< CMD_IN_RCLK_EN[1]
 #define SDCC_HC_PWRCTL_STATUS       0x240u  ///< BUS_OFF[0], BUS_ON[1]
 #define SDCC_HC_PWRCTL_MASK         0x244u
 #define SDCC_HC_PWRCTL_CLEAR        0x248u
 #define SDCC_HC_PWRCTL_CTL          0x24Cu
-#define SDCC_HC_VS_FUNC3            0x250u  ///< PWRSAVE_DLL[0]
-#define SDCC_HC_VS_DLL_CONFIG2      0x254u  ///< DLL_CLOCK_DISABLE[21], MCLK_FREQ_CALC[17:10], DDR_CAL_EN[0]
-#define SDCC_HC_VS_DLL_CONFIG3      0x258u
-#define SDCC_HC_VS_DDR_CONFIG       0x25Cu  ///< PRG_RCLK_DLY[8:0]
-#define SDCC_HC_VS_FUNC4            0x260u
-#define SDCC_HC_VS_DLL_USER_CTL     0x388u  ///< Platform-specific DLL user control
 
 // ─── HOST_CTRL1 (0x28) bits ──────────────────────────────────────────────────
 #define SDCC_HC_CTRL1_LED             BIT0
@@ -89,17 +81,21 @@
 
 // ─── HOST_CTRL2 (0x3E) bits ──────────────────────────────────────────────────
 #define SDCC_HC_CTRL2_UHS_MASK        0x0007u
+#define SDCC_HC_CTRL2_UHS_SDR104      0x0003u  ///< UHS_MODE_SEL=3 → SDR104
 #define SDCC_HC_CTRL2_1P8V_EN         BIT3
+#define SDCC_HC_CTRL2_EXECUTE_TUNING  BIT6     ///< SDHCI spec §3.7: start tuning cycle
+#define SDCC_HC_CTRL2_SAMPLING_CLK    BIT7     ///< SDHCI spec §3.7: sampling clock selected
 #define SDCC_HC_CTRL2_V4_EN           BIT12
 #define SDCC_HC_CTRL2_64_ADDR_EN      BIT13
 #define SDCC_HC_CTRL2_26_DATA_LEN     BIT10
 
 // ─── PRESENT_STATE (0x24) bits ───────────────────────────────────────────────
+// Ref: SD Host Controller Standard Specification v3.00 §2.2.9, Table 2-14/2-15
 #define SDCC_HC_STATE_CMD_INHIBIT     BIT0
 #define SDCC_HC_STATE_DAT_INHIBIT     BIT1
-#define SDCC_HC_STATE_CARD_PRESENT    BIT16
-#define SDCC_HC_STATE_CARD_STABLE     BIT17
-#define SDCC_HC_STATE_DAT_0_3_MASK    0x00F00000u
+#define SDCC_HC_STATE_CARD_PRESENT    BIT16   ///< Spec §2.2.9: Card Inserted
+#define SDCC_HC_STATE_CARD_STABLE     BIT17   ///< Spec §2.2.9: Card State Stable
+#define SDCC_HC_STATE_DAT_0_3_MASK    0x00F00000u  ///< Spec §2.2.9: DAT[3:0] Line Signal Level (bits[23:20])
 
 // ─── SW_RST (0x2F) bits ──────────────────────────────────────────────────────
 #define SDCC_HC_RST_ALL               0xFFu
@@ -135,6 +131,11 @@
 #define SDCC_HC_UHS1_SWITCH_DELAY_US  5000u
 #define SDCC_TRB_RETRIES              5u
 #define SDCC_ASYNC_TIMER_PERIOD       EFI_TIMER_PERIOD_MILLISECONDS(1)
+// NoCdPin debounce: require this many consecutive 100ms polls of Present=FALSE
+// before treating it as a real removal.  One poll = 100 ms, so 3 = 300 ms.
+// DAT lines only stay low during active I/O (microseconds); a real removal
+// is sustained indefinitely, so 3 polls safely distinguish the two.
+#define SDCC_ABSENCE_DEBOUNCE_COUNT   3u
 
 // ─── ADMA2 64-bit descriptor (12 bytes, Qualcomm SDCC5 layout) ───────────────
 // Field order: nADMAFlags(UINT16) | nDataSize(UINT16) | nDataAddress(UINT64)
@@ -225,6 +226,14 @@ typedef struct {
   BOOLEAN                               Read;
   EFI_PHYSICAL_ADDRESS                  DataPhy;
   BOOLEAN                               DataCacheFlushed;
+  //
+  // Bounce buffer: when the caller's data buffer is above 4 GB, SDCC5 cannot
+  // DMA to/from it (hardware limitation — ST_TFR stalls).  SdccDmaMap allocates
+  // a below-4GB bounce buffer and copies write data into it; SdccDmaUnmap copies
+  // read data back to the caller buffer and frees the bounce pages.
+  //
+  VOID                                 *BounceBuffer;    ///< NULL if no bounce needed
+  UINTN                                 BouncePages;     ///< page count for FreePages
   VOID                                 *AdmaDesc;
   EFI_PHYSICAL_ADDRESS                  AdmaDescPhy;
   UINTN                                 AdmaDescPages;
@@ -267,7 +276,19 @@ struct _SDCC_HC_PRIVATE_DATA {
   SDCC5_PLATFORM_CONFIG         Config;          ///< from SdccGetPlatformConfig()
   SDCC_SLOT_CAP                 Capability;      ///< from CAPS registers
   UINT16                        ControllerVersion;
+  ///
+  /// apps_clk (the SDHCI base clock the CLOCK_CTRL divisor divides from), in
+  /// Hz. Tracks whatever SdccSetClockKHz() last programmed via
+  /// SdccPlatformSetClockFreqHz(), starting from CapsBaseClkFreqKHz at
+  /// SdccHcColdInit(). Used by SdccEmmcRestoreSafeClock() to drop SDCLK
+  /// back to identification speed via divisor only after a failed
+  /// mode-switch attempt, without needing to reprogram the apps_clk PLL.
+  ///
+  UINT32                        CurrentAppsClkHz;
   BOOLEAN                       MediaPresent;
+  UINT8                         AbsenceCount;     ///< consecutive 100ms polls returning Present=FALSE (NoCdPin debounce)
+  UINT16                        SdRca;            ///< SD card RCA captured from CMD3 R6 response bits[31:16]
+  BOOLEAN                       SdBusWidthSwitched; ///< TRUE once ACMD6 + HOST_CTRL1[BIT1] set for this card
   LIST_ENTRY                    Queue;           ///< async TRB queue
   EFI_EVENT                     TimerEvent;      ///< 1 ms async drain
   EFI_EVENT                     ConnectEvent;    ///< SD hot-plug detection (TPL_CALLBACK)
@@ -315,6 +336,7 @@ struct _SDCC_HC_PRIVATE_DATA {
 // ─── Function declarations (SdccMmioHci.c) ──────────────────────────────────
 
 EFI_STATUS SdccHcMapMmio      (IN EFI_PHYSICAL_ADDRESS BaseAddress, IN UINTN Size);
+EFI_STATUS SdccHcStopClock    (IN UINTN Base);
 EFI_STATUS SdccHcReset        (IN UINTN Base);
 EFI_STATUS SdccHcEnableV4     (IN UINTN Base, IN UINT16 ControllerVersion, IN SDCC_SLOT_CAP Cap);
 EFI_STATUS SdccHcClockSupply  (IN UINTN Base, IN UINT16 ControllerVersion,
@@ -322,8 +344,9 @@ EFI_STATUS SdccHcClockSupply  (IN UINTN Base, IN UINT16 ControllerVersion,
 EFI_STATUS SdccHcInitPower    (IN UINTN Base, IN SDCC_SLOT_CAP Cap);
 EFI_STATUS SdccHcInitTimeout  (IN UINTN Base);
 EFI_STATUS SdccHcReadCapability (IN UINTN Base, OUT SDCC_SLOT_CAP *Cap);
-EFI_STATUS SdccHcCardDetect   (IN UINTN Base, OUT BOOLEAN *Present);
+EFI_STATUS SdccHcCardDetect   (IN UINTN Base, IN BOOLEAN NoCdPin, OUT BOOLEAN *Present);
 EFI_STATUS SdccHcColdInit     (IN SDCC_HC_PRIVATE_DATA *Private);
+EFI_STATUS SdccHcSdCardInit   (IN SDCC_HC_PRIVATE_DATA *Private);
 EFI_STATUS SdccHcUhs1SignalSwitch (IN UINTN Base);
 
 EFI_STATUS SdccCheckTrbEnv    (IN SDCC_HC_PRIVATE_DATA *Private, IN SDCC_HC_TRB *Trb);
@@ -375,5 +398,11 @@ VOID EFIAPI SdccDeferredConnect      (IN EFI_EVENT Event, IN VOID *Context);
 EFI_STATUS SdccNegotiateEmmcMode (IN SDCC_HC_PRIVATE_DATA *Private);
 EFI_STATUS SdccReadExtCsd        (IN SDCC_HC_PRIVATE_DATA *Private,
                                    OUT UINT8 ExtCsdBuf[EMMC_EXT_CSD_SIZE]);
+
+// ─── Component name / driver binding globals (SdccMmioHcDxe.c, ComponentName.c) ─
+
+extern EFI_DRIVER_BINDING_PROTOCOL  gSdccMmioHcDriverBinding;
+extern EFI_COMPONENT_NAME_PROTOCOL  gSdccMmioHcComponentName;
+extern EFI_COMPONENT_NAME2_PROTOCOL gSdccMmioHcComponentName2;
 
 #endif // __SDCC_MMIO_HC_DXE_H__

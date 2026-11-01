@@ -134,7 +134,9 @@ SdccReadExtCsd (
 
   Status = SdccExecTrb (Private, Trb);
   if (!EFI_ERROR (Status)) {
-    UINT32  MaxWait = 3000000u;
+    UINT32  MaxWait;
+
+    MaxWait = 3000000u;
     while (MaxWait-- > 0) {
       Status = SdccCheckTrbResult (Private, Trb);
       if (Status != EFI_NOT_READY) {
@@ -169,9 +171,9 @@ SdccReadExtCsd (
 /**
   Switch apps_clk to the given frequency and update the SDHCI clock divisor.
 
-  Calls SdccPlatformSetClockFreqHz to reprogram the GCC RCG to AppsClkHz,
-  then programs the SDHCI CLK_CTRL divisor to produce TargetKHz from that
-  base.  SdccHcClockSupply takes both values in kHz.
+  Per SDHCI spec §2.2.14, gates SDCLK first (SdccHcStopClock), then
+  reprograms the GCC RCG via SdccPlatformSetClockFreqHz, then re-enables
+  SDCLK at the new divisor via SdccHcClockSupply.
 
   @param[in]  Private      Driver instance.
   @param[in]  AppsClkHz    New apps_clk in Hz (e.g. Config.ClkHz_HS400).
@@ -198,10 +200,18 @@ SdccSetClockKHz (
 {
   EFI_STATUS  Status;
 
+  // SDHCI spec §2.2.14: gate SDCLK before switching the base clock source.
+  Status = SdccHcStopClock ((UINTN)Private->Config.BaseAddress);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
   Status = SdccPlatformSetClockFreqHz (&Private->Config, AppsClkHz);
   if (EFI_ERROR (Status)) {
     return Status;
   }
+
+  Private->CurrentAppsClkHz = AppsClkHz;
 
   return SdccHcClockSupply (
            (UINTN)Private->Config.BaseAddress,
@@ -211,115 +221,50 @@ SdccSetClockKHz (
            );
 }
 
-// ─── DLL init (HS400 / HS400-ES) ──────────────────────────────────────────────
-
 /**
-  Initialise the Qualcomm SDCC5 DLL.
+  Restore the HC to a safe identification-speed clock state before falling
+  back to a lower bus speed mode.
 
-  14-step sequence from HPG §26.1.  All tuning parameters come from
-  Private->Config.Dll, populated by SdccGetPlatformConfig from FixedPCDs.
+  SdccEmmcEnterHS400ES()/SdccEmmcEnterHS400()/SdccEmmcEnterHS200() each ramp
+  apps_clk and SDCLK up (and, for the HS400 tiers, engage the vendor DLL and
+  clock-source mux via SdccPlatformSelectClockSource/SdccPlatformDllInit)
+  before verifying the switch succeeded. If one of those functions fails
+  after the clock/DLL/mux state has already been changed,
+  SdccNegotiateEmmcMode()'s fallback immediately calls the next lower mode's
+  entry function -- which assumes it is starting from the same low/safe
+  clock SdccNegotiateEmmcMode began at, not from the failed attempt's
+  leftover high-speed state. Without this restore, the next tier's first
+  CMD6 would be issued at the wrong clock/timing.
 
-  Steps 1-9: power-cycle and enable the DLL.
-  Steps 10-14: set rclk_delay, CMD_IN_RCLK, DDR_CAL_EN, then poll lock.
+  Clears the vendor clock-source mux (SdccPlatformSelectClockSource with
+  SdccClockSrcNone) and drops SDCLK back to SDCC_HC_IDENTIFY_CLOCK_KHZ via
+  divisor only -- apps_clk itself (Private->CurrentAppsClkHz) is left as-is;
+  the next tier's own entry function reprograms it as needed. There is no
+  platform-lib entry point to explicitly disable the vendor DLL itself;
+  clearing the clock-source mux disconnects the DLL's sampling-clock
+  reference, which is the dominant factor in whether a wrongly-locked DLL
+  from the failed attempt could affect the next tier's commands.
 **/
 STATIC
-EFI_STATUS
-SdccDllInit (
+VOID
+SdccEmmcRestoreSafeClock (
   IN SDCC_HC_PRIVATE_DATA  *Private
   )
 {
-  UINTN              Base;
-  SDCC5_DLL_CONFIG  *D;
-  UINT32             DllCfg;
-  UINT32             DllCfg2;
+  EFI_STATUS  Status;
 
-  Base = (UINTN)Private->Config.BaseAddress;
-  D    = &Private->Config.Dll;
+  SdccPlatformSelectClockSource (&Private->Config, SdccClockSrcNone);
 
-  // Step 1: disable DLL output clock (CK_OUT_EN = BIT18)
-  MmioAnd32 (Base + SDCC_HC_VS_DLL_CONFIG, (UINT32)~BIT18);
-
-  // Step 2: disable DLL input clock (DLL_CLOCK_DISABLE = BIT21 of DLL_CONFIG_2)
-  MmioOr32  (Base + SDCC_HC_VS_DLL_CONFIG2, BIT21);
-
-  // Step 3: assert DLL_RST (BIT30) + PDN (BIT29)
-  MmioOr32  (Base + SDCC_HC_VS_DLL_CONFIG, BIT30 | BIT29);
-
-  // Step 4: write DLL_CONFIG_3 (platform DLL setting)
-  MmioWrite32 (Base + SDCC_HC_VS_DLL_CONFIG3, D->DllConfig3);
-
-  // Step 5: write DLL_USER_CTL (platform DLL setting)
-  MmioWrite32 (Base + SDCC_HC_VS_DLL_USER_CTL, D->DllUserCtl);
-
-  // Step 5b: DLL_CONFIG lower 16 bits (DllConfigLower), MCLK_FREQ[26:24] from DllConfig2
-  DllCfg = MmioRead32 (Base + SDCC_HC_VS_DLL_CONFIG);
-  DllCfg = (DllCfg & 0xF8FF0000u)
-          | (D->DllConfig2    & 0x07000000u)   // MCLK_FREQ field
-          | (D->DllConfigLower & 0x0000FFFFu);
-  MmioWrite32 (Base + SDCC_HC_VS_DLL_CONFIG, DllCfg);
-
-  // Step 5c: DLL_CONFIG_2 MclkFreqCalc[17:10]; keep DLL_CLOCK_DISABLE; DDR_CAL_EN=0
-  DllCfg2  = MmioRead32 (Base + SDCC_HC_VS_DLL_CONFIG2);
-  DllCfg2 &= ~(0xFFu << 10);
-  DllCfg2 |=  (D->MclkFreqCalc & 0xFFu) << 10;
-  DllCfg2 &= (UINT32)~BIT0;   // DDR_CAL_EN — enabled in step 12
-  DllCfg2 |= BIT21;            // DLL_CLOCK_DISABLE still asserted
-  MmioWrite32 (Base + SDCC_HC_VS_DLL_CONFIG2, DllCfg2);
-
-  // Step 6: re-enable DLL input clock
-  MmioAnd32 (Base + SDCC_HC_VS_DLL_CONFIG2, (UINT32)~BIT21);
-
-  // Step 7: wait 5 µs for DLL input clock to settle
-  MicroSecondDelay (5);
-
-  // Step 8: enable DLL (BIT16) and output clock (BIT18), RST + PDN still asserted
-  DllCfg  = MmioRead32 (Base + SDCC_HC_VS_DLL_CONFIG);
-  DllCfg |= BIT18 | BIT16;
-  MmioWrite32 (Base + SDCC_HC_VS_DLL_CONFIG, DllCfg);
-
-  // Step 9: wait 52 µs
-  MicroSecondDelay (52);
-
-  // Step 10: deassert RST + PDN
-  MmioAnd32 (Base + SDCC_HC_VS_DLL_CONFIG, (UINT32)~(BIT30 | BIT29));
-
-  // Step 11: toggle RST (assert → 1 µs → deassert)
-  MmioOr32  (Base + SDCC_HC_VS_DLL_CONFIG, BIT30);
-  MicroSecondDelay (1);
-  MmioAnd32 (Base + SDCC_HC_VS_DLL_CONFIG, (UINT32)~BIT30);
-
-  // Step 12: DDR_CONFIG rclk_delay bits[8:0] (platform value from PCD)
-  {
-    UINT32  DdrCfg = MmioRead32 (Base + SDCC_HC_VS_DDR_CONFIG);
-    DdrCfg = (DdrCfg & ~0x1FFu) | (D->DdrRclkDelay & 0x1FFu);
-    MmioWrite32 (Base + SDCC_HC_VS_DDR_CONFIG, DdrCfg);
+  Status = SdccHcClockSupply (
+             (UINTN)Private->Config.BaseAddress,
+             Private->ControllerVersion,
+             Private->CurrentAppsClkHz / 1000u,
+             SDCC_HC_IDENTIFY_CLOCK_KHZ
+             );
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_WARN,
+            "[SdccEmmc] RestoreSafeClock: clock supply failed: %r\n", Status));
   }
-
-  // Step 13: CMD_IN_RCLK_EN (VENDOR_DDR200_CFG bit1)
-  MmioOr32 (Base + SDCC_HC_VS_DDR200_CFG, BIT1);
-
-  // Step 14: enable DDR calibration (DLL_CONFIG_2 bit0) then poll DDR_DLL_LOCK_JDR
-  MmioOr32 (Base + SDCC_HC_VS_DLL_CONFIG2, BIT0);
-
-  {
-    UINT32  Waited  = 0;
-    UINT32  DllSts;
-    while (Waited < 50000u) {
-      if (MmioRead32 (Base + SDCC_HC_VS_DLL_STATUS) & BIT11) {
-        break;
-      }
-      MicroSecondDelay (1);
-      Waited++;
-    }
-    DllSts = MmioRead32 (Base + SDCC_HC_VS_DLL_STATUS);
-    DEBUG ((DEBUG_INFO, "[SdccEmmc] DLL_STATUS=0x%08x DDR_DLL_LOCK_JDR=%d\n",
-            DllSts, !!(DllSts & BIT11)));
-    if (!(DllSts & BIT11)) {
-      DEBUG ((DEBUG_ERROR, "[SdccEmmc] DLL lock timeout after 50 ms\n"));
-      return EFI_TIMEOUT;
-    }
-  }
-  return EFI_SUCCESS;
 }
 
 // ─── Mode entry sequences ─────────────────────────────────────────────────────
@@ -359,9 +304,8 @@ SdccHcEnterHS400Final (
 
   Base = (UINTN)Private->Config.BaseAddress;
 
-  // HC_SELECT_IN=6 (DDR200/HS400), HC_SELECT_IN_EN=1
-  MmioAnd32 (Base + SDCC_HC_VS_FUNC, (UINT32)~(BIT18 | (0x7u << 19)));
-  MmioOr32  (Base + SDCC_HC_VS_FUNC, ((UINT32)6 << 19) | BIT18);
+  // DDR200/HS400 clock/strobe source for the vendor DLL.
+  SdccPlatformSelectClockSource (&Private->Config, SdccClockSrcDdr200Hs400);
 
   // apps_clk → ClkHz_HS400. SDHCI divisor N=1 → SDCLK = ClkHz_HS400/2 (DDR).
   Status = SdccSetClockKHz (Private, Private->Config.ClkHz_HS400,
@@ -377,11 +321,8 @@ SdccHcEnterHS400Final (
   // HOST_CTRL1 — 8-bit + HighSpeed
   MmioOr8 (Base + SDCC_HC_HOST_CTRL1, BIT5 | BIT2);
 
-  // DLL power save off (PWRSAVE bit1 = 0)
-  MmioAnd32 (Base + SDCC_HC_VS_FUNC, (UINT32)~BIT1);
-
-  // Full DLL init (HPG §26.1, 14 steps)
-  Status = SdccDllInit (Private);
+  // Full vendor DLL init (HPG §26.1) — platform-specific, see SdccPlatformLib.
+  Status = SdccPlatformDllInit (&Private->Config, SdccDllModeHs400);
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_WARN, "[SdccEmmc] %a: DLL init failed: %r\n", ModeName, Status));
     return Status;
@@ -390,6 +331,9 @@ SdccHcEnterHS400Final (
   // EXT_CSD re-read at HS400 operating frequency as hardware verification.
   Status = SdccReadExtCsd (Private, VerifyBuf);
   if (EFI_ERROR (Status)) {
+    SDCC5_DLL_DIAG  Diag;
+
+    SdccPlatformGetDllDiag (&Private->Config, &Diag);
     DEBUG ((DEBUG_WARN,
             "[SdccEmmc] %a: EXT_CSD verification failed at %u kHz DDR: %r\n"
             "  VFUNC=0x%08x HCTRL1=0x%02x CLK=0x%04x "
@@ -397,21 +341,26 @@ SdccHcEnterHS400Final (
             ModeName,
             Private->Config.ClkHz_HS400 / 2000u,
             Status,
-            MmioRead32 (Base + SDCC_HC_VS_FUNC),
+            Diag.VFunc,
             MmioRead8  (Base + SDCC_HC_HOST_CTRL1),
             MmioRead16 (Base + SDCC_HC_CLOCK_CTRL),
-            MmioRead32 (Base + SDCC_HC_VS_DLL_STATUS),
-            MmioRead32 (Base + SDCC_HC_VS_DLL_CONFIG)));
+            Diag.DllStatus,
+            Diag.DllConfig));
     return Status;
   }
 
-  DEBUG ((DEBUG_INFO,
-          "[SdccEmmc] %a verified: EXT_CSD read OK at %u kHz DDR "
-          "VFUNC=0x%08x CLK=0x%04x\n",
-          ModeName,
-          Private->Config.ClkHz_HS400 / 2000u,
-          MmioRead32 (Base + SDCC_HC_VS_FUNC),
-          MmioRead16 (Base + SDCC_HC_CLOCK_CTRL)));
+  {
+    SDCC5_DLL_DIAG  Diag;
+
+    SdccPlatformGetDllDiag (&Private->Config, &Diag);
+    DEBUG ((DEBUG_INFO,
+            "[SdccEmmc] %a verified: EXT_CSD read OK at %u kHz DDR "
+            "VFUNC=0x%08x CLK=0x%04x\n",
+            ModeName,
+            Private->Config.ClkHz_HS400 / 2000u,
+            Diag.VFunc,
+            MmioRead16 (Base + SDCC_HC_CLOCK_CTRL)));
+  }
 
   return EFI_SUCCESS;
 }
@@ -442,9 +391,6 @@ SdccEmmcEnterHS400ES (
   )
 {
   EFI_STATUS  Status;
-  UINTN       Base;
-
-  Base = (UINTN)Private->Config.BaseAddress;
 
   // Step 1: HS_TIMING=HS200 (prerequisite for DDR mode switch)
   Status = SdccEmmcSwitch (Private, EMMC_CMD6_HS_TIMING_HS200);
@@ -453,10 +399,9 @@ SdccEmmcEnterHS400ES (
     return Status;
   }
 
-  // Step 2: Lower HC clock to ~24 MHz for SDR12 transition; HC_SELECT_IN=2 (FEEDBACK)
+  // Step 2: Lower HC clock to ~24 MHz for SDR12 transition; FEEDBACK clock source.
   // Keep apps_clk at ClkHz_HS400 — only SDHCI divisor changes for this intermediate step.
-  MmioAnd32 (Base + SDCC_HC_VS_FUNC, (UINT32)~(BIT18 | (0x7u << 19)));
-  MmioOr32  (Base + SDCC_HC_VS_FUNC, ((UINT32)2 << 19) | BIT18);
+  SdccPlatformSelectClockSource (&Private->Config, SdccClockSrcFeedback);
   Status = SdccSetClockKHz (Private, Private->Config.ClkHz_HS400, 26000u);
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_WARN, "[SdccEmmc] HS400-ES: 26 MHz clock step failed: %r\n", Status));
@@ -501,15 +446,15 @@ SdccEmmcEnterHS400 (
   )
 {
   EFI_STATUS  Status;
-  UINTN       Base;
-
-  Base = (UINTN)Private->Config.BaseAddress;
 
   Status = SdccEmmcSwitch (Private, EMMC_CMD6_HS_TIMING_HS200);
-  if (EFI_ERROR (Status)) { return Status; }
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "[SdccEmmc] HS400: CMD6 HS_TIMING=HS200 failed: %r\n", Status));
+    return Status;
+  }
 
-  MmioAnd32 (Base + SDCC_HC_VS_FUNC, (UINT32)~(BIT18 | (0x7u << 19)));
-  MmioOr32  (Base + SDCC_HC_VS_FUNC, ((UINT32)2 << 19) | BIT18);
+  // FEEDBACK clock source for the SDR12 clock-lowering intermediate step.
+  SdccPlatformSelectClockSource (&Private->Config, SdccClockSrcFeedback);
   // Keep apps_clk at ClkHz_HS400 — only SDHCI divisor changes for this intermediate step.
   Status = SdccSetClockKHz (Private, Private->Config.ClkHz_HS400, 26000u);
   if (EFI_ERROR (Status)) {
@@ -518,14 +463,23 @@ SdccEmmcEnterHS400 (
   }
 
   Status = SdccEmmcSwitch (Private, EMMC_CMD6_HS_TIMING_HS);
-  if (EFI_ERROR (Status)) { return Status; }
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "[SdccEmmc] HS400: CMD6 HS_TIMING=HS failed: %r\n", Status));
+    return Status;
+  }
 
   // BUS_WIDTH=DDR 8-bit (no Enhanced Strobe — EXT_CSD[183]=0x06)
   Status = SdccEmmcSwitch (Private, EMMC_CMD6_WRITE_BYTE (183, 0x06u));
-  if (EFI_ERROR (Status)) { return Status; }
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "[SdccEmmc] HS400: CMD6 BUS_WIDTH=DDR8 failed: %r\n", Status));
+    return Status;
+  }
 
   Status = SdccEmmcSwitch (Private, EMMC_CMD6_HS_TIMING_HS400);
-  if (EFI_ERROR (Status)) { return Status; }
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "[SdccEmmc] HS400: CMD6 HS_TIMING=HS400 failed: %r\n", Status));
+    return Status;
+  }
 
   // Steps 6-15: shared HS400 final-phase sequence (HC_SELECT_IN, clock, DLL, verify)
   return SdccHcEnterHS400Final (Private, "HS400");
@@ -560,9 +514,8 @@ SdccEmmcEnterHS200 (
   MmioAnd16 (Base + SDCC_HC_HOST_CTRL2, (UINT16)~SDCC_HC_CTRL2_UHS_MASK);
   MmioOr16  (Base + SDCC_HC_HOST_CTRL2, 0x0003u);
 
-  // HC_SELECT_IN=2 (FEEDBACK) for HS200 SDR
-  MmioAnd32 (Base + SDCC_HC_VS_FUNC, (UINT32)~(BIT18 | (0x7u << 19)));
-  MmioOr32  (Base + SDCC_HC_VS_FUNC, ((UINT32)2 << 19) | BIT18);
+  // FEEDBACK clock source for HS200 SDR mode.
+  SdccPlatformSelectClockSource (&Private->Config, SdccClockSrcFeedback);
 
   // apps_clk → ClkHz_HS200 (bypass mode, N=0) → SDCLK = ClkHz_HS200.
   Status = SdccSetClockKHz (Private, Private->Config.ClkHz_HS200,
@@ -677,8 +630,22 @@ SdccNegotiateEmmcMode (
       if (!EFI_ERROR (Status)) {
         break;
       }
-      DEBUG ((DEBUG_WARN, "[SdccEmmc] HS400-ES failed (%r) — falling back to HS400\n",
-              Status));
+      DEBUG ((DEBUG_WARN, "[SdccEmmc] HS400-ES failed (%r) — falling back\n", Status));
+      SdccEmmcRestoreSafeClock (Private);
+      if (DevType & EXTCSD_DT_HS400_18V) {
+        // Device supports HS400 — attempt it.
+        /* fall through */
+      } else {
+        // Device only supports HS400ES (not HS400) — skip straight to HS200.
+        DEBUG ((DEBUG_WARN, "[SdccEmmc] Device lacks HS400 support — falling back to HS200\n"));
+        Status = SdccEmmcEnterHS200 (Private);
+        if (!EFI_ERROR (Status)) {
+          break;
+        }
+        DEBUG ((DEBUG_WARN, "[SdccEmmc] HS200 failed (%r) — falling back to HS\n", Status));
+        SdccEmmcRestoreSafeClock (Private);
+        goto TryHS;
+      }
       /* fall through */
 
     case SdccModeHS400:
@@ -688,6 +655,7 @@ SdccNegotiateEmmcMode (
       }
       DEBUG ((DEBUG_WARN, "[SdccEmmc] HS400 failed (%r) — falling back to HS200\n",
               Status));
+      SdccEmmcRestoreSafeClock (Private);
       /* fall through */
 
     case SdccModeHS200:
@@ -697,8 +665,10 @@ SdccNegotiateEmmcMode (
       }
       DEBUG ((DEBUG_WARN, "[SdccEmmc] HS200 failed (%r) — falling back to HS\n",
               Status));
+      SdccEmmcRestoreSafeClock (Private);
       /* fall through */
 
+    TryHS:
     case SdccModeHS:
       Status = SdccEmmcEnterHS (Private);
       if (!EFI_ERROR (Status)) {
