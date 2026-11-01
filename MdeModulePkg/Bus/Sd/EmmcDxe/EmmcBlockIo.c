@@ -88,9 +88,21 @@ EmmcSelect (
   Packet.SdMmcStatusBlk = &SdMmcStatusBlk;
   Packet.Timeout        = EMMC_GENERIC_TIMEOUT;
 
-  SdMmcCmdBlk.CommandIndex    = EMMC_SELECT_DESELECT_CARD;
-  SdMmcCmdBlk.CommandType     = SdMmcCommandTypeAc;
-  SdMmcCmdBlk.ResponseType    = SdMmcResponseTypeR1;
+  SdMmcCmdBlk.CommandIndex = EMMC_SELECT_DESELECT_CARD;
+  if (Rca == 0) {
+    //
+    // Deselect: CMD7 with RCA=0 sends no response per eMMC spec §6.10.4.
+    // Use Bc (broadcast, no response) so the HC does not wait for one.
+    //
+    SdMmcCmdBlk.CommandType  = SdMmcCommandTypeBc;
+    SdMmcCmdBlk.ResponseType = SdMmcResponseTypeR1; // ignored for Bc
+  } else {
+    //
+    // Select: addressed command — device returns R1b (command + busy).
+    //
+    SdMmcCmdBlk.CommandType  = SdMmcCommandTypeAc;
+    SdMmcCmdBlk.ResponseType = SdMmcResponseTypeR1b;
+  }
   SdMmcCmdBlk.CommandArgument = (UINT32)Rca << 16;
 
   Status = PassThru->PassThru (PassThru, Device->Slot, &Packet, NULL);
@@ -1096,7 +1108,9 @@ EmmcResetEx (
 
     Request = EMMC_REQUEST_FROM_LINK (Link);
 
-    gBS->CloseEvent (Request->Event);
+    if (Request->Event != NULL) {
+      gBS->CloseEvent (Request->Event);
+    }
     Request->Token->TransactionStatus = EFI_ABORTED;
 
     if (Request->IsEnd) {

@@ -41,6 +41,7 @@
 
 [Packages]
   MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
 
 [LibraryClasses]
   DevicePathLib
@@ -54,6 +55,7 @@
 
 [Protocols]
   gEfiSdMmcPassThruProtocolGuid                ## TO_START
+  gEfiSdccHcRcaProtocolGuid                    ## SOMETIMES_CONSUMES  ## for RCA discovery
   gEfiBlockIoProtocolGuid                      ## BY_START
   gEfiBlockIo2ProtocolGuid                     ## BY_START
   gEfiStorageSecurityCommandProtocolGuid       ## SOMETIMES_PRODUCES

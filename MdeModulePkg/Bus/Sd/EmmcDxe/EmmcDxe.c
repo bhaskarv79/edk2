@@ -10,6 +10,12 @@
 **/
 
 #include "EmmcDxe.h"
+//
+// EFI_SDCC_HC_RCA_PROTOCOL — installed by SdccMmioHcDxe on the HC handle.
+// gEfiSdccHcRcaProtocolGuid is declared in MdeModulePkg.dec [Protocols] and
+// resolved via AutoGen from EmmcDxe.inf [Protocols].
+//
+typedef struct { UINT16 Rca; } EFI_SDCC_HC_RCA_PROTOCOL;
 
 //
 // EmmcDxe Driver Binding Protocol Instance
@@ -284,7 +290,6 @@ DiscoverAllPartitions (
   EFI_STATUS      Status;
   EMMC_PARTITION  *Partition;
   EMMC_CSD        *Csd;
-  EMMC_CID        *Cid;
   EMMC_EXT_CSD    *ExtCsd;
   UINT8           Slot;
   UINT64          Capacity;
@@ -292,54 +297,50 @@ DiscoverAllPartitions (
   UINT8           Index;
   UINT32          SecCount;
   UINT32          GpSizeMult;
+  UINT16          Rca;
 
   Slot = Device->Slot;
 
-  Status = EmmcSendStatus (Device, Slot + 1, &DevStatus);
-  if (EFI_ERROR (Status)) {
-    return Status;
-  }
-
   //
-  // Deselect the device to force it enter stby mode before getting CSD
-  // register content.
-  // Note here we don't judge return status as some EMMC devices return
-  // error but the state has been stby.
+  // Discover the RCA from the HC driver via EFI_SDCC_HC_RCA_PROTOCOL installed on
+  // the PassThru handle.  Falls back to (Slot + 1) — the standard EDK2 default —
+  // for HC drivers that do not install the protocol (e.g. SdMmcPciHcDxe).
+  // This eliminates the hardcoded Rca=2 that only works on Qualcomm Kodiak.
   //
-  EmmcSelect (Device, 0);
+  Rca = (UINT16)(Slot + 1);
+  {
+    EFI_SDCC_HC_RCA_PROTOCOL  *RcaProto;
+    EFI_STATUS                 RcaStatus;
+    RcaStatus = gBS->HandleProtocol (
+                       Device->Private->Controller,
+                       &gEfiSdccHcRcaProtocolGuid,
+                       (VOID **)&RcaProto
+                       );
+    if (!EFI_ERROR (RcaStatus)) {
+      Rca = RcaProto->Rca;
+    }
+  }
 
-  Status = EmmcSendStatus (Device, Slot + 1, &DevStatus);
+  DEBUG ((DEBUG_WARN, "[EmmcDxe] DiscoverAllPartitions Slot=%d RCA=%d\n",
+          Slot, Rca));
+
+  DEBUG ((DEBUG_WARN, "[EmmcDxe] Step1: CMD13 SEND_STATUS RCA=%d\n", Rca));
+  //Status = EmmcSendStatus (Device, Slot + 1, &DevStatus);
+  Status = EmmcSendStatus (Device, Rca, &DevStatus);
+  DEBUG ((DEBUG_WARN, "[EmmcDxe] Step1: Status=%r DevStatus=0x%08x\n",
+          Status, DevStatus));
   if (EFI_ERROR (Status)) {
     return Status;
   }
 
-  Csd    = &Device->Csd;
-  Status = EmmcGetCsd (Device, Slot + 1, Csd);
-  if (EFI_ERROR (Status)) {
-    return Status;
-  }
-
-  DumpCsd (Csd);
-
-  if ((Csd->CSizeLow | Csd->CSizeHigh << 2) == 0xFFF) {
-    Device->SectorAddressing = TRUE;
-  } else {
-    Device->SectorAddressing = FALSE;
-  }
-
-  Cid    = &Device->Cid;
-  Status = EmmcGetCid (Device, Slot + 1, Cid);
-  if (EFI_ERROR (Status)) {
-    return Status;
-  }
-
-  Status = EmmcSelect (Device, Slot + 1);
-  if (EFI_ERROR (Status)) {
-    return Status;
-  }
+  // Device->Csd is zeroed (CMD9 skipped); set pointer so EraseGrp calc is safe.
+  Csd = &Device->Csd;
 
   ExtCsd = &Device->ExtCsd;
+  DEBUG ((DEBUG_WARN, "[EmmcDxe] Step7: CMD8 SEND_EXT_CSD\n"));
   Status = EmmcGetExtCsd (Device, ExtCsd);
+  DEBUG ((DEBUG_WARN, "[EmmcDxe] Step7: Status=%r ExtCsdRev=%d\n",
+          Status, EFI_ERROR(Status) ? 0 : ExtCsd->ExtCsdRev));
   if (EFI_ERROR (Status)) {
     return Status;
   }
@@ -350,6 +351,13 @@ DiscoverAllPartitions (
     DEBUG ((DEBUG_ERROR, "The EMMC device version is too low, we don't support!!!\n"));
     return EFI_UNSUPPORTED;
   }
+
+  //
+  // eMMC ≥ 4.0 (ExtCsdRev ≥ 2) always uses sector addressing for capacity > 2 GB.
+  // SecCount in EXT_CSD is only valid when the device uses sector addressing.
+  // Since CMD9 (CSD read) was skipped, set SectorAddressing unconditionally here.
+  //
+  Device->SectorAddressing = TRUE;
 
   if ((ExtCsd->PartitioningSupport & BIT0) != BIT0) {
     DEBUG ((DEBUG_ERROR, "The EMMC device doesn't support Partition Feature!!!\n"));
@@ -583,7 +591,6 @@ DiscoverEmmcDevice (
   Device              = NULL;
   DevicePath          = NULL;
   NewDevicePath       = NULL;
-  RemainingDevicePath = NULL;
   PassThru            = Private->PassThru;
   Device              = &Private->Device[Slot];
 
@@ -595,11 +602,16 @@ DiscoverEmmcDevice (
                        Slot,
                        &DevicePath
                        );
+  DEBUG ((DEBUG_WARN, "[EmmcDxe] DiscoverEmmcDevice Slot=%d BuildDevicePath=%r SubType=0x%x\n",
+          Slot, Status,
+          EFI_ERROR(Status) ? 0xFF : (UINT32)DevicePath->SubType));
   if (EFI_ERROR (Status)) {
     return Status;
   }
 
   if (DevicePath->SubType != MSG_EMMC_DP) {
+    DEBUG ((DEBUG_ERROR, "[EmmcDxe] SubType 0x%x != MSG_EMMC_DP 0x%x - unsupported\n",
+            (UINT32)DevicePath->SubType, (UINT32)MSG_EMMC_DP));
     Status = EFI_UNSUPPORTED;
     goto Error;
   }
@@ -666,7 +678,11 @@ DiscoverEmmcDevice (
     // Expose all partitions in the Emmc device to upper layer.
     //
     for (Index = 0; Index < EMMC_MAX_PARTITIONS; Index++) {
-      InstallProtocolOnPartition (Device, Index);
+      Status = InstallProtocolOnPartition (Device, Index);
+      if (EFI_ERROR (Status) && (Status != EFI_INVALID_PARAMETER)) {
+        DEBUG ((DEBUG_WARN, "[EmmcDxe] Partition %u install failed: %r (continuing)\n",
+                (UINT32)Index, Status));
+      }
     }
   } else if (!IsDevicePathEnd (RemainingDevicePath)) {
     //
@@ -863,6 +879,8 @@ EmmcDxeDriverBindingStart (
   EMMC_DRIVER_PRIVATE_DATA       *Private;
   UINT8                          Slot;
 
+  DEBUG ((DEBUG_WARN, "[EmmcDxe] DriverBindingStart Controller=%p\n", Controller));
+
   Private  = NULL;
   PassThru = NULL;
   Status   = gBS->OpenProtocol (
@@ -929,14 +947,15 @@ EmmcDxeDriverBindingStart (
     while (TRUE) {
       Status = PassThru->GetNextSlot (PassThru, &Slot);
       if (EFI_ERROR (Status)) {
-        //
-        // Cannot find more legal slots.
-        //
+        DEBUG ((DEBUG_WARN, "[EmmcDxe] GetNextSlot done - no more slots (%r)\n", Status));
         Status = EFI_SUCCESS;
         break;
       }
 
+      DEBUG ((DEBUG_WARN, "[EmmcDxe] Slot=%d: calling DiscoverEmmcDevice\n", Slot));
       Status = DiscoverEmmcDevice (Private, Slot, NULL);
+      DEBUG ((DEBUG_WARN, "[EmmcDxe] Slot=%d: DiscoverEmmcDevice returned %r\n",
+              Slot, Status));
       if (EFI_ERROR (Status) && (Status != EFI_ALREADY_STARTED)) {
         break;
       }
