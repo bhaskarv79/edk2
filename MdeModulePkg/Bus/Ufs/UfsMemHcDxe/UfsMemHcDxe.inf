@@ -1,0 +1,62 @@
+## @file
+#  UFS Memory-Mapped Host Controller Driver.
+#
+#  Binds to non-discoverable devices registered with
+#  EDKII_NON_DISCOVERABLE_UFS_MMIO_DEVICE_GUID and produces
+#  EDKII_UFS_HOST_CONTROLLER_PROTOCOL on the same handle for UfsPassThruDxe,
+#  without the PCI I/O emulation of NonDiscoverablePciDeviceDxe.
+#
+#  Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.<BR>
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+##
+
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = UfsMemHcDxe
+  MODULE_UNI_FILE                = UfsMemHcDxe.uni
+  FILE_GUID                      = F7DE1AB5-371A-42DF-9195-784F3FD0486B
+  MODULE_TYPE                    = UEFI_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = UfsMemHcDxeEntryPoint
+
+#
+# The following information is for reference only and not required by the build tools.
+#
+#  VALID_ARCHITECTURES           = IA32 X64 EBC AARCH64 RISCV64 LOONGARCH64
+#
+#  DRIVER_BINDING                =  gUfsMemHcDriverBinding
+#  COMPONENT_NAME                =  gUfsMemHcComponentName
+#  COMPONENT_NAME2               =  gUfsMemHcComponentName2
+#
+
+[Sources]
+  ComponentName.c
+  UfsMemHc.c
+  UfsMemHcDxe.c
+  UfsMemHcDxe.h
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+
+[LibraryClasses]
+  BaseLib
+  BaseMemoryLib
+  DebugLib
+  IoLib
+  MemoryAllocationLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+  UefiLib
+
+[Guids]
+  gEdkiiNonDiscoverableUfsMmioDeviceGuid    ## CONSUMES ## GUID
+
+[Protocols]
+  gEdkiiNonDiscoverableDeviceProtocolGuid   ## TO_START
+  gEdkiiUfsHostControllerProtocolGuid       ## BY_START
+
+[UserExtensions.TianoCore."ExtraFiles"]
+  UfsMemHcDxeExtra.uni
