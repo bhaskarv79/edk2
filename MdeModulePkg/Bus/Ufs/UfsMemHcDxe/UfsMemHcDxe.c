@@ -224,7 +224,8 @@ UfsMemHcGetDmaAlignment (
 
   @retval EFI_SUCCESS              The driver is started on the controller.
   @retval EFI_OUT_OF_RESOURCES     The private data could not be allocated.
-  @retval EFI_DEVICE_ERROR         The CPU DMA alignment is not usable.
+  @retval EFI_DEVICE_ERROR         The CPU DMA alignment is not usable, or the
+                                   controller registers are not accessible.
   @retval other                    Opening the device, its Initialize() hook,
                                    or installing the protocol failed.
 
@@ -241,6 +242,7 @@ UfsMemHcDriverBindingStart (
   EFI_STATUS               Status;
   NON_DISCOVERABLE_DEVICE  *Device;
   UFS_MEM_HC_PRIVATE_DATA  *Private;
+  UINT32                   Capabilities;
 
   Status = gBS->OpenProtocol (
                   Controller,
@@ -283,6 +285,30 @@ UfsMemHcDriverBindingStart (
     }
   }
 
+  //
+  // A controller without 64-bit addressing can only reach the low 4 GB, so
+  // AllocateBuffer() and Map() must keep its DMA buffers below that.
+  //
+  // The register window must be live by now: the platform brought the
+  // controller up before boot, or Initialize() above did. A window that is
+  // not clocked or not mapped reads back all ones, which would otherwise
+  // look like a controller with 64-bit addressing.
+  //
+  Capabilities = MmioRead32 ((UINTN)Private->MmioBase + UFS_MEM_HC_CAP_OFFSET);
+  if (Capabilities == MAX_UINT32) {
+    DEBUG ((
+      DEBUG_ERROR,
+      "%a: CAP at 0x%Lx reads 0x%08x, controller not accessible\n",
+      __func__,
+      (UINT64)Private->MmioBase,
+      Capabilities
+      ));
+    Status = EFI_DEVICE_ERROR;
+    goto FreePrivate;
+  }
+
+  Private->Dma64 = (BOOLEAN)((Capabilities & UFS_MEM_HC_CAP_64ADDR) != 0);
+
   Status = gBS->InstallProtocolInterface (
                   &Controller,
                   &gEdkiiUfsHostControllerProtocolGuid,
@@ -296,11 +322,12 @@ UfsMemHcDriverBindingStart (
 
   DEBUG ((
     DEBUG_INFO,
-    "%a: base 0x%Lx size 0x%Lx %a DMA\n",
+    "%a: base 0x%Lx size 0x%Lx %a DMA, %a addressing\n",
     __func__,
     (UINT64)Private->MmioBase,
     Private->MmioSize,
-    Private->DmaCoherent ? "coherent" : "non-coherent"
+    Private->DmaCoherent ? "coherent" : "non-coherent",
+    Private->Dma64 ? "64-bit" : "32-bit"
     ));
 
   return EFI_SUCCESS;
