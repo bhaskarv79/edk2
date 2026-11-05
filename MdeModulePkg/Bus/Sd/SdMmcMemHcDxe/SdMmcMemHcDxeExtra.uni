@@ -9,6 +9,6 @@
 
 #string STR_PROPERTIES_MODULE_NAME
 #language en-US
-"SD/MMC Pci Host Controller Driver"
+"SD/MMC Memory-Mapped Host Controller Driver"
 
 

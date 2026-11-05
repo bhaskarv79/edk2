@@ -667,7 +667,7 @@ SdCardSendTuningBlk (
   Refer to SD Physical Layer Simplified Spec 4.1 Section 4.7 and
   SD Host Controller Simplified Spec 3.0 section Figure 3-7 for details.
 
-  @param[in] HcIo          A pointer to the SD_MMC_HC_IO instance.
+  @param[in] HcIo          The host controller I/O context.
   @param[in] PassThru       A pointer to the EFI_SD_MMC_PASS_THRU_PROTOCOL instance.
   @param[in] Slot           The slot number of the SD card to send the command to.
 
@@ -677,7 +677,7 @@ SdCardSendTuningBlk (
 **/
 EFI_STATUS
 SdCardTuningClock (
-  IN SD_MMC_HC_IO            *HcIo,
+  IN SD_MMC_HC_IO                   *HcIo,
   IN EFI_SD_MMC_PASS_THRU_PROTOCOL  *PassThru,
   IN UINT8                          Slot
   )
@@ -739,7 +739,7 @@ SdCardTuningClock (
   Refer to SD Physical Layer Simplified Spec 4.1 Section 4.7 and
   SD Host Controller Simplified Spec 3.0 section Figure 3-7 for details.
 
-  @param[in] HcIo          A pointer to the SD_MMC_HC_IO instance.
+  @param[in] HcIo          The host controller I/O context.
   @param[in] PassThru       A pointer to the EFI_SD_MMC_PASS_THRU_PROTOCOL instance.
   @param[in] Slot           The slot number of the SD card to send the command to.
   @param[in] Rca            The relative device address to be assigned.
@@ -751,7 +751,7 @@ SdCardTuningClock (
 **/
 EFI_STATUS
 SdCardSwitchBusWidth (
-  IN SD_MMC_HC_IO            *HcIo,
+  IN SD_MMC_HC_IO                   *HcIo,
   IN EFI_SD_MMC_PASS_THRU_PROTOCOL  *PassThru,
   IN UINT8                          Slot,
   IN UINT16                         Rca,
@@ -1069,7 +1069,7 @@ SdGetTargetBusMode (
   Refer to SD Physical Layer Simplified Spec 4.1 Section 4.7 and
   SD Host Controller Simplified Spec 3.0 section Figure 2-29 for details.
 
-  @param[in] HcIo          A pointer to the SD_MMC_HC_IO instance.
+  @param[in] HcIo          The host controller I/O context.
   @param[in] PassThru       A pointer to the EFI_SD_MMC_PASS_THRU_PROTOCOL instance.
   @param[in] Slot           The slot number of the SD card to send the command to.
   @param[in] Rca            The relative device address to be assigned.
@@ -1082,7 +1082,7 @@ SdGetTargetBusMode (
 **/
 EFI_STATUS
 SdCardSetBusMode (
-  IN SD_MMC_HC_IO            *HcIo,
+  IN SD_MMC_HC_IO                   *HcIo,
   IN EFI_SD_MMC_PASS_THRU_PROTOCOL  *PassThru,
   IN UINT8                          Slot,
   IN UINT16                         Rca,
@@ -1213,7 +1213,7 @@ SdCardIdentification (
   )
 {
   EFI_STATUS                     Status;
-  SD_MMC_HC_IO            *HcIo;
+  SD_MMC_HC_IO                   *HcIo;
   EFI_SD_MMC_PASS_THRU_PROTOCOL  *PassThru;
   UINT32                         Ocr;
   UINT16                         Rca;
@@ -1231,7 +1231,7 @@ SdCardIdentification (
   ForceVoltage33 = FALSE;
   SdVersion1     = FALSE;
 
-  HcIo    = Private->HcIo;
+  HcIo     = Private->HcIo;
   PassThru = &Private->PassThru;
 
 Voltage33Retry:

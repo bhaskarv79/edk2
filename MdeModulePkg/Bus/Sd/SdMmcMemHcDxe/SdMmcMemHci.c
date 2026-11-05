@@ -1,5 +1,5 @@
 /** @file
-  This driver is used to manage SD/MMC PCI host controllers which are compliance
+  This driver is used to manage memory-mapped SD/MMC host controllers which are compliance
   with SD Host Controller Simplified Specification version 3.00 plus the 64-bit
   System Addressing support in SD Host Controller Simplified Specification version
   4.20.
@@ -81,53 +81,13 @@ DumpCapabilityReg (
 }
 
 /**
-  Read SlotInfo register from SD/MMC host controller pci config space.
-
-  @param[in]  HcIo        The PCI IO protocol instance.
-  @param[out] FirstBar     The buffer to store the first BAR value.
-  @param[out] SlotNum      The buffer to store the supported slot number.
-
-  @retval EFI_SUCCESS      The operation succeeds.
-  @retval Others           The operation fails.
-
-**/
-EFI_STATUS
-EFIAPI
-SdMmcHcGetSlotInfo (
-  IN     SD_MMC_HC_IO  *HcIo,
-  OUT UINT8                   *FirstBar,
-  OUT UINT8                   *SlotNum
-  )
-{
-  EFI_STATUS           Status;
-  SD_MMC_HC_SLOT_INFO  SlotInfo;
-
-  Status = HcIo->Pci.Read (
-                        HcIo,
-                        EfiPciIoWidthUint8,
-                        SD_MMC_HC_SLOT_OFFSET,
-                        sizeof (SlotInfo),
-                        &SlotInfo
-                        );
-  if (EFI_ERROR (Status)) {
-    return Status;
-  }
-
-  *FirstBar = SlotInfo.FirstBar;
-  *SlotNum  = SlotInfo.SlotNum + 1;
-  ASSERT ((*FirstBar + *SlotNum) < SD_MMC_HC_MAX_SLOT);
-  return EFI_SUCCESS;
-}
-
-/**
   Read/Write specified SD/MMC host controller mmio register.
 
-  @param[in]      HcIo        The PCI IO protocol instance.
-  @param[in]      BarIndex     The BAR index of the standard PCI Configuration
-                               header to use as the base address for the memory
-                               operation to perform.
-  @param[in]      Offset       The offset within the selected BAR to start the
-                               memory operation.
+  @param[in]      HcIo         The host controller I/O context.
+  @param[in]      BarIndex     The slot index. A memory-mapped controller has
+                               a single slot, 0.
+  @param[in]      Offset       The offset within the register window to start
+                               the memory operation.
   @param[in]      Read         A boolean to indicate it's read or write operation.
   @param[in]      Count        The width of the mmio register in bytes.
                                Must be 1, 2 , 4 or 8 bytes.
@@ -137,81 +97,93 @@ SdMmcHcGetSlotInfo (
                                having ownership of the data buffer and ensuring its
                                size not less than Count bytes.
 
-  @retval EFI_INVALID_PARAMETER The HcIo or Data is NULL or the Count is not valid.
+  @retval EFI_INVALID_PARAMETER The HcIo or Data is NULL, BarIndex is not 0, or
+                                the Count is not valid.
+  @retval EFI_UNSUPPORTED       The access is unaligned or falls outside the
+                                register window.
   @retval EFI_SUCCESS           The read/write operation succeeds.
-  @retval Others                The read/write operation fails.
 
 **/
 EFI_STATUS
 EFIAPI
 SdMmcHcRwMmio (
   IN     SD_MMC_HC_IO  *HcIo,
-  IN     UINT8                BarIndex,
-  IN     UINT32               Offset,
-  IN     BOOLEAN              Read,
-  IN     UINT8                Count,
-  IN OUT VOID                 *Data
+  IN     UINT8         BarIndex,
+  IN     UINT32        Offset,
+  IN     BOOLEAN       Read,
+  IN     UINT8         Count,
+  IN OUT VOID          *Data
   )
 {
-  EFI_STATUS                 Status;
-  SD_MMC_HC_IO_WIDTH  Width;
+  UINTN  Address;
 
-  if ((HcIo == NULL) || (Data == NULL)) {
+  if ((HcIo == NULL) || (Data == NULL) || (BarIndex >= SD_MMC_HC_MAX_SLOT)) {
     return EFI_INVALID_PARAMETER;
   }
 
+  if ((Count != 1) && (Count != 2) && (Count != 4) && (Count != 8)) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  //
+  // An 8 byte access is done as two 32-bit accesses, as through PCI I/O.
+  //
+  if (((Offset & (MIN (Count, 4) - 1)) != 0) ||
+      ((UINT64)Offset + Count > HcIo->MmioSize))
+  {
+    return EFI_UNSUPPORTED;
+  }
+
+  Address = HcIo->MmioBase + Offset;
+
   switch (Count) {
     case 1:
-      Width = EfiPciIoWidthUint8;
+      if (Read) {
+        *(UINT8 *)Data = MmioRead8 (Address);
+      } else {
+        MmioWrite8 (Address, *(UINT8 *)Data);
+      }
+
       break;
     case 2:
-      Width = EfiPciIoWidthUint16;
-      Count = 1;
+      if (Read) {
+        WriteUnaligned16 ((UINT16 *)Data, MmioRead16 (Address));
+      } else {
+        MmioWrite16 (Address, ReadUnaligned16 ((UINT16 *)Data));
+      }
+
       break;
     case 4:
-      Width = EfiPciIoWidthUint32;
-      Count = 1;
-      break;
-    case 8:
-      Width = EfiPciIoWidthUint32;
-      Count = 2;
+      if (Read) {
+        WriteUnaligned32 ((UINT32 *)Data, MmioRead32 (Address));
+      } else {
+        MmioWrite32 (Address, ReadUnaligned32 ((UINT32 *)Data));
+      }
+
       break;
     default:
-      return EFI_INVALID_PARAMETER;
+      if (Read) {
+        WriteUnaligned32 ((UINT32 *)Data, MmioRead32 (Address));
+        WriteUnaligned32 ((UINT32 *)Data + 1, MmioRead32 (Address + 4));
+      } else {
+        MmioWrite32 (Address, ReadUnaligned32 ((UINT32 *)Data));
+        MmioWrite32 (Address + 4, ReadUnaligned32 ((UINT32 *)Data + 1));
+      }
+
+      break;
   }
 
-  if (Read) {
-    Status = HcIo->Mem.Read (
-                          HcIo,
-                          Width,
-                          BarIndex,
-                          (UINT64)Offset,
-                          Count,
-                          Data
-                          );
-  } else {
-    Status = HcIo->Mem.Write (
-                          HcIo,
-                          Width,
-                          BarIndex,
-                          (UINT64)Offset,
-                          Count,
-                          Data
-                          );
-  }
-
-  return Status;
+  return EFI_SUCCESS;
 }
 
 /**
   Do OR operation with the value of the specified SD/MMC host controller mmio register.
 
-  @param[in] HcIo             The PCI IO protocol instance.
-  @param[in] BarIndex          The BAR index of the standard PCI Configuration
-                               header to use as the base address for the memory
-                               operation to perform.
-  @param[in] Offset            The offset within the selected BAR to start the
-                               memory operation.
+  @param[in] HcIo             The host controller I/O context.
+  @param[in] BarIndex          The slot index, 0 for a memory-mapped
+                               controller.
+  @param[in] Offset            The offset within the register window to
+                               start the memory operation.
   @param[in] Count             The width of the mmio register in bytes.
                                Must be 1, 2 , 4 or 8 bytes.
   @param[in] OrData            The pointer to the data used to do OR operation.
@@ -228,10 +200,10 @@ EFI_STATUS
 EFIAPI
 SdMmcHcOrMmio (
   IN  SD_MMC_HC_IO  *HcIo,
-  IN  UINT8                BarIndex,
-  IN  UINT32               Offset,
-  IN  UINT8                Count,
-  IN  VOID                 *OrData
+  IN  UINT8         BarIndex,
+  IN  UINT32        Offset,
+  IN  UINT8         Count,
+  IN  VOID          *OrData
   )
 {
   EFI_STATUS  Status;
@@ -264,12 +236,11 @@ SdMmcHcOrMmio (
 /**
   Do AND operation with the value of the specified SD/MMC host controller mmio register.
 
-  @param[in] HcIo             The PCI IO protocol instance.
-  @param[in] BarIndex          The BAR index of the standard PCI Configuration
-                               header to use as the base address for the memory
-                               operation to perform.
-  @param[in] Offset            The offset within the selected BAR to start the
-                               memory operation.
+  @param[in] HcIo             The host controller I/O context.
+  @param[in] BarIndex          The slot index, 0 for a memory-mapped
+                               controller.
+  @param[in] Offset            The offset within the register window to
+                               start the memory operation.
   @param[in] Count             The width of the mmio register in bytes.
                                Must be 1, 2 , 4 or 8 bytes.
   @param[in] AndData           The pointer to the data used to do AND operation.
@@ -286,10 +257,10 @@ EFI_STATUS
 EFIAPI
 SdMmcHcAndMmio (
   IN  SD_MMC_HC_IO  *HcIo,
-  IN  UINT8                BarIndex,
-  IN  UINT32               Offset,
-  IN  UINT8                Count,
-  IN  VOID                 *AndData
+  IN  UINT8         BarIndex,
+  IN  UINT32        Offset,
+  IN  UINT8         Count,
+  IN  VOID          *AndData
   )
 {
   EFI_STATUS  Status;
@@ -322,12 +293,11 @@ SdMmcHcAndMmio (
 /**
   Wait for the value of the specified MMIO register set to the test value.
 
-  @param[in]  HcIo         The PCI IO protocol instance.
-  @param[in]  BarIndex      The BAR index of the standard PCI Configuration
-                            header to use as the base address for the memory
-                            operation to perform.
-  @param[in]  Offset        The offset within the selected BAR to start the
-                            memory operation.
+  @param[in]  HcIo         The host controller I/O context.
+  @param[in]  BarIndex      The slot index, 0 for a memory-mapped
+                            controller.
+  @param[in]  Offset        The offset within the register window to
+                            start the memory operation.
   @param[in]  Count         The width of the mmio register in bytes.
                             Must be 1, 2, 4 or 8 bytes.
   @param[in]  MaskValue     The mask value of memory.
@@ -342,18 +312,18 @@ EFI_STATUS
 EFIAPI
 SdMmcHcCheckMmioSet (
   IN  SD_MMC_HC_IO  *HcIo,
-  IN  UINT8                BarIndex,
-  IN  UINT32               Offset,
-  IN  UINT8                Count,
-  IN  UINT64               MaskValue,
-  IN  UINT64               TestValue
+  IN  UINT8         BarIndex,
+  IN  UINT32        Offset,
+  IN  UINT8         Count,
+  IN  UINT64        MaskValue,
+  IN  UINT64        TestValue
   )
 {
   EFI_STATUS  Status;
   UINT64      Value;
 
   //
-  // Access PCI MMIO space to see if the value is the tested one.
+  // Access MMIO space to see if the value is the tested one.
   //
   Value  = 0;
   Status = SdMmcHcRwMmio (HcIo, BarIndex, Offset, TRUE, Count, &Value);
@@ -373,12 +343,11 @@ SdMmcHcCheckMmioSet (
 /**
   Wait for the value of the specified MMIO register set to the test value.
 
-  @param[in]  HcIo         The PCI IO protocol instance.
-  @param[in]  BarIndex      The BAR index of the standard PCI Configuration
-                            header to use as the base address for the memory
-                            operation to perform.
-  @param[in]  Offset        The offset within the selected BAR to start the
-                            memory operation.
+  @param[in]  HcIo         The host controller I/O context.
+  @param[in]  BarIndex      The slot index, 0 for a memory-mapped
+                            controller.
+  @param[in]  Offset        The offset within the register window to
+                            start the memory operation.
   @param[in]  Count         The width of the mmio register in bytes.
                             Must be 1, 2, 4 or 8 bytes.
   @param[in]  MaskValue     The mask value of memory.
@@ -396,12 +365,12 @@ EFI_STATUS
 EFIAPI
 SdMmcHcWaitMmioSet (
   IN  SD_MMC_HC_IO  *HcIo,
-  IN  UINT8                BarIndex,
-  IN  UINT32               Offset,
-  IN  UINT8                Count,
-  IN  UINT64               MaskValue,
-  IN  UINT64               TestValue,
-  IN  UINT64               Timeout
+  IN  UINT8         BarIndex,
+  IN  UINT32        Offset,
+  IN  UINT8         Count,
+  IN  UINT64        MaskValue,
+  IN  UINT64        TestValue,
+  IN  UINT64        Timeout
   )
 {
   EFI_STATUS  Status;
@@ -440,7 +409,7 @@ SdMmcHcWaitMmioSet (
 /**
   Get the controller version information from the specified slot.
 
-  @param[in]  HcIo           The PCI IO protocol instance.
+  @param[in]  HcIo           The host controller I/O context.
   @param[in]  Slot            The slot number of the SD card to send the command to.
   @param[out] Version         The buffer to store the version information.
 
@@ -451,8 +420,8 @@ SdMmcHcWaitMmioSet (
 EFI_STATUS
 SdMmcHcGetControllerVersion (
   IN     SD_MMC_HC_IO  *HcIo,
-  IN     UINT8                Slot,
-  OUT    UINT16               *Version
+  IN     UINT8         Slot,
+  OUT    UINT16        *Version
   )
 {
   EFI_STATUS  Status;
@@ -483,8 +452,8 @@ SdMmcHcReset (
   IN UINT8                   Slot
   )
 {
-  EFI_STATUS           Status;
-  UINT8                SwReset;
+  EFI_STATUS    Status;
+  UINT8         SwReset;
   SD_MMC_HC_IO  *HcIo;
 
   //
@@ -546,7 +515,7 @@ SdMmcHcReset (
     }
   }
 
-  HcIo  = Private->HcIo;
+  HcIo   = Private->HcIo;
   Status = SdMmcHcOrMmio (HcIo, Slot, SD_MMC_HC_SW_RST, sizeof (SwReset), &SwReset);
 
   if (EFI_ERROR (Status)) {
@@ -609,7 +578,7 @@ SdMmcHcReset (
   Set all interrupt status bits in Normal and Error Interrupt Status Enable
   register.
 
-  @param[in] HcIo          The PCI IO protocol instance.
+  @param[in] HcIo          The host controller I/O context.
   @param[in] Slot           The slot number of the SD card to send the command to.
 
   @retval EFI_SUCCESS       The operation executes successfully.
@@ -619,7 +588,7 @@ SdMmcHcReset (
 EFI_STATUS
 SdMmcHcEnableInterrupt (
   IN SD_MMC_HC_IO  *HcIo,
-  IN UINT8                Slot
+  IN UINT8         Slot
   )
 {
   EFI_STATUS  Status;
@@ -646,7 +615,7 @@ SdMmcHcEnableInterrupt (
 /**
   Get the capability data from the specified slot.
 
-  @param[in]  HcIo           The PCI IO protocol instance.
+  @param[in]  HcIo           The host controller I/O context.
   @param[in]  Slot            The slot number of the SD card to send the command to.
   @param[out] Capability      The buffer to store the capability data.
 
@@ -656,9 +625,9 @@ SdMmcHcEnableInterrupt (
 **/
 EFI_STATUS
 SdMmcHcGetCapability (
-  IN     SD_MMC_HC_IO  *HcIo,
-  IN     UINT8                Slot,
-  OUT SD_MMC_HC_SLOT_CAP      *Capability
+  IN     SD_MMC_HC_IO     *HcIo,
+  IN     UINT8            Slot,
+  OUT SD_MMC_HC_SLOT_CAP  *Capability
   )
 {
   EFI_STATUS  Status;
@@ -677,7 +646,7 @@ SdMmcHcGetCapability (
 /**
   Get the maximum current capability data from the specified slot.
 
-  @param[in]  HcIo           The PCI IO protocol instance.
+  @param[in]  HcIo           The host controller I/O context.
   @param[in]  Slot            The slot number of the SD card to send the command to.
   @param[out] MaxCurrent      The buffer to store the maximum current capability data.
 
@@ -688,8 +657,8 @@ SdMmcHcGetCapability (
 EFI_STATUS
 SdMmcHcGetMaxCurrent (
   IN     SD_MMC_HC_IO  *HcIo,
-  IN     UINT8                Slot,
-  OUT UINT64                  *MaxCurrent
+  IN     UINT8         Slot,
+  OUT UINT64           *MaxCurrent
   )
 {
   EFI_STATUS  Status;
@@ -705,7 +674,7 @@ SdMmcHcGetMaxCurrent (
 
   Refer to SD Host Controller Simplified spec 3.0 Section 3.1 for details.
 
-  @param[in]  HcIo         The PCI IO protocol instance.
+  @param[in]  HcIo         The host controller I/O context.
   @param[in]  Slot          The slot number of the SD card to send the command to.
   @param[out] MediaPresent  The pointer to the media present boolean value.
 
@@ -717,8 +686,8 @@ SdMmcHcGetMaxCurrent (
 EFI_STATUS
 SdMmcHcCardDetect (
   IN SD_MMC_HC_IO  *HcIo,
-  IN UINT8                Slot,
-  OUT BOOLEAN             *MediaPresent
+  IN UINT8         Slot,
+  OUT BOOLEAN      *MediaPresent
   )
 {
   EFI_STATUS  Status;
@@ -768,7 +737,7 @@ SdMmcHcCardDetect (
 
   Refer to SD Host Controller Simplified spec 3.0 Section 3.2.2 for details.
 
-  @param[in] HcIo          The PCI IO protocol instance.
+  @param[in] HcIo          The host controller I/O context.
   @param[in] Slot           The slot number of the SD card to send the command to.
 
   @retval EFI_SUCCESS       Succeed to stop SD/MMC clock.
@@ -778,7 +747,7 @@ SdMmcHcCardDetect (
 EFI_STATUS
 SdMmcHcStopClock (
   IN SD_MMC_HC_IO  *HcIo,
-  IN UINT8                Slot
+  IN UINT8         Slot
   )
 {
   EFI_STATUS  Status;
@@ -815,7 +784,7 @@ SdMmcHcStopClock (
 /**
   Start the SD clock.
 
-  @param[in] HcIo  The PCI IO protocol instance.
+  @param[in] HcIo  The host controller I/O context.
   @param[in] Slot   The slot number.
 
   @retval EFI_SUCCESS  Succeeded to start the SD clock.
@@ -824,7 +793,7 @@ SdMmcHcStopClock (
 EFI_STATUS
 SdMmcHcStartSdClock (
   IN SD_MMC_HC_IO  *HcIo,
-  IN UINT8                Slot
+  IN UINT8         Slot
   )
 {
   UINT16  ClockCtrl;
@@ -860,16 +829,16 @@ SdMmcHcClockSupply (
   IN UINT64                  ClockFreq
   )
 {
-  EFI_STATUS           Status;
-  UINT32               SettingFreq;
-  UINT32               Divisor;
-  UINT32               Remainder;
-  UINT16               ClockCtrl;
-  UINT32               BaseClkFreq;
-  UINT16               ControllerVer;
+  EFI_STATUS    Status;
+  UINT32        SettingFreq;
+  UINT32        Divisor;
+  UINT32        Remainder;
+  UINT16        ClockCtrl;
+  UINT32        BaseClkFreq;
+  UINT16        ControllerVer;
   SD_MMC_HC_IO  *HcIo;
 
-  HcIo         = Private->HcIo;
+  HcIo          = Private->HcIo;
   BaseClkFreq   = Private->BaseClkFreq[Slot];
   ControllerVer = Private->ControllerVersion[Slot];
 
@@ -999,7 +968,7 @@ SdMmcHcClockSupply (
 
   Refer to SD Host Controller Simplified spec 3.0 Section 3.3 for details.
 
-  @param[in] HcIo          The PCI IO protocol instance.
+  @param[in] HcIo          The host controller I/O context.
   @param[in] Slot           The slot number of the SD card to send the command to.
   @param[in] PowerCtrl      The value setting to the power control register.
 
@@ -1010,8 +979,8 @@ SdMmcHcClockSupply (
 EFI_STATUS
 SdMmcHcPowerControl (
   IN SD_MMC_HC_IO  *HcIo,
-  IN UINT8                Slot,
-  IN UINT8                PowerCtrl
+  IN UINT8         Slot,
+  IN UINT8         PowerCtrl
   )
 {
   EFI_STATUS  Status;
@@ -1039,7 +1008,7 @@ SdMmcHcPowerControl (
 
   Refer to SD Host Controller Simplified spec 3.0 Section 3.4 for details.
 
-  @param[in] HcIo          The PCI IO protocol instance.
+  @param[in] HcIo          The host controller I/O context.
   @param[in] Slot           The slot number of the SD card to send the command to.
   @param[in] BusWidth       The bus width used by the SD/MMC device, it must be 1, 4 or 8.
 
@@ -1050,8 +1019,8 @@ SdMmcHcPowerControl (
 EFI_STATUS
 SdMmcHcSetBusWidth (
   IN SD_MMC_HC_IO  *HcIo,
-  IN UINT8                Slot,
-  IN UINT16               BusWidth
+  IN UINT8         Slot,
+  IN UINT16        BusWidth
   )
 {
   EFI_STATUS  Status;
@@ -1089,7 +1058,7 @@ SdMmcHcSetBusWidth (
 /**
   Configure V4 controller enhancements at initialization.
 
-  @param[in] HcIo          The PCI IO protocol instance.
+  @param[in] HcIo          The host controller I/O context.
   @param[in] Slot           The slot number of the SD card to send the command to.
   @param[in] Capability     The capability of the slot.
   @param[in] ControllerVer  The version of host controller.
@@ -1099,10 +1068,10 @@ SdMmcHcSetBusWidth (
 **/
 EFI_STATUS
 SdMmcHcInitV4Enhancements (
-  IN SD_MMC_HC_IO  *HcIo,
-  IN UINT8                Slot,
-  IN SD_MMC_HC_SLOT_CAP   Capability,
-  IN UINT16               ControllerVer
+  IN SD_MMC_HC_IO        *HcIo,
+  IN UINT8               Slot,
+  IN SD_MMC_HC_SLOT_CAP  Capability,
+  IN UINT16              ControllerVer
   )
 {
   EFI_STATUS  Status;
@@ -1155,7 +1124,7 @@ SdMmcHcInitV4Enhancements (
 
   Refer to SD Host Controller Simplified spec 3.0 Section 3.3 for details.
 
-  @param[in] HcIo          The PCI IO protocol instance.
+  @param[in] HcIo          The host controller I/O context.
   @param[in] Slot           The slot number of the SD card to send the command to.
   @param[in] Capability     The capability of the slot.
 
@@ -1165,9 +1134,9 @@ SdMmcHcInitV4Enhancements (
 **/
 EFI_STATUS
 SdMmcHcInitPowerVoltage (
-  IN SD_MMC_HC_IO  *HcIo,
-  IN UINT8                Slot,
-  IN SD_MMC_HC_SLOT_CAP   Capability
+  IN SD_MMC_HC_IO        *HcIo,
+  IN UINT8               Slot,
+  IN SD_MMC_HC_SLOT_CAP  Capability
   )
 {
   EFI_STATUS  Status;
@@ -1216,7 +1185,7 @@ SdMmcHcInitPowerVoltage (
 
   Refer to SD Host Controller Simplified spec 3.0 Section 2.2.15 for details.
 
-  @param[in] HcIo          The PCI IO protocol instance.
+  @param[in] HcIo          The host controller I/O context.
   @param[in] Slot           The slot number of the SD card to send the command to.
 
   @retval EFI_SUCCESS       The timeout control register is configured successfully.
@@ -1226,7 +1195,7 @@ SdMmcHcInitPowerVoltage (
 EFI_STATUS
 SdMmcHcInitTimeoutCtrl (
   IN SD_MMC_HC_IO  *HcIo,
-  IN UINT8                Slot
+  IN UINT8         Slot
   )
 {
   EFI_STATUS  Status;
@@ -1255,9 +1224,9 @@ SdMmcHcInitHost (
   IN UINT8                   Slot
   )
 {
-  EFI_STATUS           Status;
-  SD_MMC_HC_IO  *HcIo;
-  SD_MMC_HC_SLOT_CAP   Capability;
+  EFI_STATUS          Status;
+  SD_MMC_HC_IO        *HcIo;
+  SD_MMC_HC_SLOT_CAP  Capability;
 
   //
   // Notify the SD/MMC override protocol that we are about to initialize
@@ -1281,7 +1250,7 @@ SdMmcHcInitHost (
     }
   }
 
-  HcIo      = Private->HcIo;
+  HcIo       = Private->HcIo;
   Capability = Private->Capability[Slot];
 
   Status = SdMmcHcInitV4Enhancements (HcIo, Slot, Capability, Private->ControllerVersion[Slot]);
@@ -1339,7 +1308,7 @@ SdMmcHcInitHost (
   Set SD Host Controler control 2 registry according to selected speed.
 
   @param[in] ControllerHandle The handle of the controller.
-  @param[in] HcIo            The PCI IO protocol instance.
+  @param[in] HcIo            The host controller I/O context.
   @param[in] Slot             The slot number of the SD card to send the command to.
   @param[in] Timing           The timing to select.
 
@@ -1348,10 +1317,10 @@ SdMmcHcInitHost (
 **/
 EFI_STATUS
 SdMmcHcUhsSignaling (
-  IN EFI_HANDLE           ControllerHandle,
-  IN SD_MMC_HC_IO  *HcIo,
-  IN UINT8                Slot,
-  IN SD_MMC_BUS_MODE      Timing
+  IN EFI_HANDLE       ControllerHandle,
+  IN SD_MMC_HC_IO     *HcIo,
+  IN UINT8            Slot,
+  IN SD_MMC_BUS_MODE  Timing
   )
 {
   EFI_STATUS  Status;
@@ -1428,7 +1397,7 @@ SdMmcHcUhsSignaling (
 /**
   Set driver strength in host controller.
 
-  @param[in] HcIo           The PCI IO protocol instance.
+  @param[in] HcIo           The host controller I/O context.
   @param[in] SlotIndex       The slot index of the card.
   @param[in] DriverStrength  DriverStrength to set in the controller.
 
@@ -1437,7 +1406,7 @@ SdMmcHcUhsSignaling (
 **/
 EFI_STATUS
 SdMmcSetDriverStrength (
-  IN SD_MMC_HC_IO      *HcIo,
+  IN SD_MMC_HC_IO             *HcIo,
   IN UINT8                    SlotIndex,
   IN SD_DRIVER_STRENGTH_TYPE  DriverStrength
   )
@@ -1462,7 +1431,7 @@ SdMmcSetDriverStrength (
 /**
   Turn on/off LED.
 
-  @param[in] HcIo          The PCI IO protocol instance.
+  @param[in] HcIo          The host controller I/O context.
   @param[in] Slot           The slot number of the SD card to send the command to.
   @param[in] On             The boolean to turn on/off LED.
 
@@ -1473,8 +1442,8 @@ SdMmcSetDriverStrength (
 EFI_STATUS
 SdMmcHcLedOnOff (
   IN SD_MMC_HC_IO  *HcIo,
-  IN UINT8                Slot,
-  IN BOOLEAN              On
+  IN UINT8         Slot,
+  IN BOOLEAN       On
   )
 {
   EFI_STATUS  Status;
@@ -1516,7 +1485,7 @@ BuildAdmaDescTable (
   UINT64                Remaining;
   UINT64                Address;
   UINTN                 TableSize;
-  SD_MMC_HC_IO   *HcIo;
+  SD_MMC_HC_IO          *HcIo;
   EFI_STATUS            Status;
   UINTN                 Bytes;
   UINT32                AdmaMaxDataPerLine;
@@ -1529,7 +1498,7 @@ BuildAdmaDescTable (
 
   Data    = Trb->DataPhy;
   DataLen = Trb->DataLen;
-  HcIo   = Trb->Private->HcIo;
+  HcIo    = Trb->Private->HcIo;
 
   //
   // Check for valid ranges in 32bit ADMA Descriptor Table
@@ -1578,38 +1547,35 @@ BuildAdmaDescTable (
   Entries        = (UINTN)DivU64x32 ((DataLen + AdmaMaxDataPerLine - 1), AdmaMaxDataPerLine);
   TableSize      = Entries * DescSize;
   Trb->AdmaPages = (UINT32)EFI_SIZE_TO_PAGES (TableSize);
-  Status         = HcIo->AllocateBuffer (
-                            HcIo,
-                            AllocateAnyPages,
-                            EfiBootServicesData,
-                            EFI_SIZE_TO_PAGES (TableSize),
-                            (VOID **)&AdmaDesc,
-                            0
-                            );
+  Status         = SdMmcHcIoAllocateBuffer (
+                     HcIo,
+                     EFI_SIZE_TO_PAGES (TableSize),
+                     (VOID **)&AdmaDesc
+                     );
   if (EFI_ERROR (Status)) {
     return EFI_OUT_OF_RESOURCES;
   }
 
   ZeroMem (AdmaDesc, TableSize);
   Bytes  = TableSize;
-  Status = HcIo->Map (
-                    HcIo,
-                    EfiPciIoOperationBusMasterCommonBuffer,
-                    AdmaDesc,
-                    &Bytes,
-                    &Trb->AdmaDescPhy,
-                    &Trb->AdmaMap
-                    );
+  Status = SdMmcHcIoMap (
+             HcIo,
+             SdMmcHcIoOperationBusMasterCommonBuffer,
+             AdmaDesc,
+             &Bytes,
+             &Trb->AdmaDescPhy,
+             &Trb->AdmaMap
+             );
 
   if (EFI_ERROR (Status) || (Bytes != TableSize)) {
     //
     // Map error or unable to map the whole RFis buffer into a contiguous region.
     //
-    HcIo->FreeBuffer (
-             HcIo,
-             EFI_SIZE_TO_PAGES (TableSize),
-             AdmaDesc
-             );
+    SdMmcHcIoFreeBuffer (
+      HcIo,
+      EFI_SIZE_TO_PAGES (TableSize),
+      AdmaDesc
+      );
     return EFI_OUT_OF_RESOURCES;
   }
 
@@ -1619,17 +1585,17 @@ BuildAdmaDescTable (
     //
     // The ADMA doesn't support 64bit addressing.
     //
-    HcIo->Unmap (
-             HcIo,
-             Trb->AdmaMap
-             );
+    SdMmcHcIoUnmap (
+      HcIo,
+      Trb->AdmaMap
+      );
     Trb->AdmaMap = NULL;
 
-    HcIo->FreeBuffer (
-             HcIo,
-             EFI_SIZE_TO_PAGES (TableSize),
-             AdmaDesc
-             );
+    SdMmcHcIoFreeBuffer (
+      HcIo,
+      EFI_SIZE_TO_PAGES (TableSize),
+      AdmaDesc
+      );
     return EFI_DEVICE_ERROR;
   }
 
@@ -1831,28 +1797,28 @@ SdMmcSetupMemoryForDmaTransfer (
   IN SD_MMC_HC_TRB           *Trb
   )
 {
-  EFI_PCI_IO_PROTOCOL_OPERATION  Flag;
+  SD_MMC_HC_IO_OPERATION  Flag;
   SD_MMC_HC_IO            *HcIo;
-  UINTN                          MapLength;
-  EFI_STATUS                     Status;
+  UINTN                   MapLength;
+  EFI_STATUS              Status;
 
   if (Trb->Read) {
-    Flag = EfiPciIoOperationBusMasterWrite;
+    Flag = SdMmcHcIoOperationBusMasterWrite;
   } else {
-    Flag = EfiPciIoOperationBusMasterRead;
+    Flag = SdMmcHcIoOperationBusMasterRead;
   }
 
   HcIo = Private->HcIo;
   if ((Trb->Data != NULL) && (Trb->DataLen != 0)) {
     MapLength = Trb->DataLen;
-    Status    = HcIo->Map (
-                         HcIo,
-                         Flag,
-                         Trb->Data,
-                         &MapLength,
-                         &Trb->DataPhy,
-                         &Trb->DataMap
-                         );
+    Status    = SdMmcHcIoMap (
+                  HcIo,
+                  Flag,
+                  Trb->Data,
+                  &MapLength,
+                  &Trb->DataPhy,
+                  &Trb->DataMap
+                  );
     if (EFI_ERROR (Status) || (Trb->DataLen != MapLength)) {
       return EFI_BAD_BUFFER_SIZE;
     }
@@ -2005,41 +1971,41 @@ SdMmcFreeTrb (
   HcIo = Trb->Private->HcIo;
 
   if (Trb->AdmaMap != NULL) {
-    HcIo->Unmap (
-             HcIo,
-             Trb->AdmaMap
-             );
+    SdMmcHcIoUnmap (
+      HcIo,
+      Trb->AdmaMap
+      );
   }
 
   if (Trb->Adma32Desc != NULL) {
-    HcIo->FreeBuffer (
-             HcIo,
-             Trb->AdmaPages,
-             Trb->Adma32Desc
-             );
+    SdMmcHcIoFreeBuffer (
+      HcIo,
+      Trb->AdmaPages,
+      Trb->Adma32Desc
+      );
   }
 
   if (Trb->Adma64V3Desc != NULL) {
-    HcIo->FreeBuffer (
-             HcIo,
-             Trb->AdmaPages,
-             Trb->Adma64V3Desc
-             );
+    SdMmcHcIoFreeBuffer (
+      HcIo,
+      Trb->AdmaPages,
+      Trb->Adma64V3Desc
+      );
   }
 
   if (Trb->Adma64V4Desc != NULL) {
-    HcIo->FreeBuffer (
-             HcIo,
-             Trb->AdmaPages,
-             Trb->Adma64V4Desc
-             );
+    SdMmcHcIoFreeBuffer (
+      HcIo,
+      Trb->AdmaPages,
+      Trb->Adma64V4Desc
+      );
   }
 
   if (Trb->DataMap != NULL) {
-    HcIo->Unmap (
-             HcIo,
-             Trb->DataMap
-             );
+    SdMmcHcIoUnmap (
+      HcIo,
+      Trb->DataMap
+      );
   }
 
   FreePool (Trb);
@@ -2065,7 +2031,7 @@ SdMmcCheckTrbEnv (
 {
   EFI_STATUS                           Status;
   EFI_SD_MMC_PASS_THRU_COMMAND_PACKET  *Packet;
-  SD_MMC_HC_IO                  *HcIo;
+  SD_MMC_HC_IO                         *HcIo;
   UINT32                               PresentState;
 
   Packet = Trb->Packet;
@@ -2087,7 +2053,7 @@ SdMmcCheckTrbEnv (
     PresentState = BIT0;
   }
 
-  HcIo  = Private->HcIo;
+  HcIo   = Private->HcIo;
   Status = SdMmcHcCheckMmioSet (
              HcIo,
              Trb->Slot,
@@ -2171,7 +2137,7 @@ SdMmcExecTrb (
 {
   EFI_STATUS                           Status;
   EFI_SD_MMC_PASS_THRU_COMMAND_PACKET  *Packet;
-  SD_MMC_HC_IO                  *HcIo;
+  SD_MMC_HC_IO                         *HcIo;
   UINT16                               Cmd;
   UINT16                               IntStatus;
   UINT32                               Argument;
@@ -2186,7 +2152,7 @@ SdMmcExecTrb (
   AddressingMode64 = FALSE;
 
   Packet = Trb->Packet;
-  HcIo  = Trb->Private->HcIo;
+  HcIo   = Trb->Private->HcIo;
   //
   // Clear all bits in Error Interrupt Status Register
   //
@@ -2608,6 +2574,45 @@ SdMmcCheckCommandComplete (
 }
 
 /**
+  Read or write a register repeatedly, as a FIFO.
+
+  @param[in]      HcIo      The host controller I/O context.
+  @param[in]      Slot      The slot index.
+  @param[in]      Offset    The offset of the FIFO register.
+  @param[in]      Read      TRUE to read from the FIFO, FALSE to write to it.
+  @param[in]      Width     The width of each access in bytes: 1, 2 or 4.
+  @param[in]      Count     The number of accesses.
+  @param[in, out] Buffer    The data, Width * Count bytes.
+
+  @retval EFI_SUCCESS   All accesses completed.
+  @retval Others        SdMmcHcRwMmio() failed.
+**/
+STATIC
+EFI_STATUS
+SdMmcHcRwFifo (
+  IN     SD_MMC_HC_IO  *HcIo,
+  IN     UINT8         Slot,
+  IN     UINT32        Offset,
+  IN     BOOLEAN       Read,
+  IN     UINT8         Width,
+  IN     UINTN         Count,
+  IN OUT UINT8         *Buffer
+  )
+{
+  EFI_STATUS  Status;
+  UINTN       Index;
+
+  for (Index = 0; Index < Count; Index++) {
+    Status = SdMmcHcRwMmio (HcIo, Slot, Offset, Read, Width, Buffer + (Index * Width));
+    if (EFI_ERROR (Status)) {
+      return Status;
+    }
+  }
+
+  return EFI_SUCCESS;
+}
+
+/**
   Transfers data from card using PIO method.
 
   @param[in] Private    A pointer to the SD_MMC_HC_PRIVATE_DATA instance.
@@ -2625,11 +2630,11 @@ SdMmcTransferDataWithPio (
   IN UINT16                  IntStatus
   )
 {
-  EFI_STATUS                 Status;
-  UINT16                     Data16;
-  UINT32                     BlockCount;
-  SD_MMC_HC_IO_WIDTH  Width;
-  UINTN                      Count;
+  EFI_STATUS  Status;
+  UINT16      Data16;
+  UINT32      BlockCount;
+  UINT8       Width;
+  UINTN       Count;
 
   BlockCount = (Trb->DataLen / Trb->BlockSize);
   if (Trb->DataLen % Trb->BlockSize != 0) {
@@ -2642,17 +2647,17 @@ SdMmcTransferDataWithPio (
 
   switch (Trb->BlockSize % sizeof (UINT32)) {
     case 0:
-      Width = EfiPciIoWidthFifoUint32;
+      Width = sizeof (UINT32);
       Count = Trb->BlockSize / sizeof (UINT32);
       break;
     case 2:
-      Width = EfiPciIoWidthFifoUint16;
+      Width = sizeof (UINT16);
       Count = Trb->BlockSize / sizeof (UINT16);
       break;
     case 1:
     case 3:
     default:
-      Width = EfiPciIoWidthFifoUint8;
+      Width = sizeof (UINT8);
       Count = Trb->BlockSize;
       break;
   }
@@ -2665,14 +2670,15 @@ SdMmcTransferDataWithPio (
     Data16 = BIT5;
     SdMmcHcRwMmio (Private->HcIo, Trb->Slot, SD_MMC_HC_NOR_INT_STS, FALSE, sizeof (Data16), &Data16);
 
-    Status = Private->HcIo->Mem.Read (
-                                   Private->HcIo,
-                                   Width,
-                                   Trb->Slot,
-                                   SD_MMC_HC_BUF_DAT_PORT,
-                                   Count,
-                                   (VOID *)((UINT8 *)Trb->Data + (Trb->BlockSize * Trb->PioBlockIndex))
-                                   );
+    Status = SdMmcHcRwFifo (
+               Private->HcIo,
+               Trb->Slot,
+               SD_MMC_HC_BUF_DAT_PORT,
+               TRUE,
+               Width,
+               Count,
+               (UINT8 *)Trb->Data + (Trb->BlockSize * Trb->PioBlockIndex)
+               );
     if (EFI_ERROR (Status)) {
       return Status;
     }
@@ -2686,14 +2692,15 @@ SdMmcTransferDataWithPio (
     Data16 = BIT4;
     SdMmcHcRwMmio (Private->HcIo, Trb->Slot, SD_MMC_HC_NOR_INT_STS, FALSE, sizeof (Data16), &Data16);
 
-    Status = Private->HcIo->Mem.Write (
-                                   Private->HcIo,
-                                   Width,
-                                   Trb->Slot,
-                                   SD_MMC_HC_BUF_DAT_PORT,
-                                   Count,
-                                   (VOID *)((UINT8 *)Trb->Data + (Trb->BlockSize * Trb->PioBlockIndex))
-                                   );
+    Status = SdMmcHcRwFifo (
+               Private->HcIo,
+               Trb->Slot,
+               SD_MMC_HC_BUF_DAT_PORT,
+               FALSE,
+               Width,
+               Count,
+               (UINT8 *)Trb->Data + (Trb->BlockSize * Trb->PioBlockIndex)
+               );
     if (EFI_ERROR (Status)) {
       return Status;
     }

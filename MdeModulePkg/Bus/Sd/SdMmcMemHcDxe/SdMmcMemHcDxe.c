@@ -1,13 +1,18 @@
 /** @file
-  This driver is used to manage SD/MMC PCI host controllers which are compliance
-  with SD Host Controller Simplified Specification version 3.00 plus the 64-bit
-  System Addressing support in SD Host Controller Simplified Specification version
-  4.20.
+  This driver is used to manage memory-mapped SD/MMC host controllers which
+  comply with SD Host Controller Simplified Specification version 3.00 plus the
+  64-bit System Addressing support in SD Host Controller Simplified
+  Specification version 4.20.
+
+  Platforms describe each controller with EDKII_NON_DISCOVERABLE_DEVICE, using
+  the EDKII_NON_DISCOVERABLE_SDHCI_MMIO_DEVICE_GUID type. The driver is the
+  memory-mapped counterpart of SdMmcPciHcDxe and shares its card handling.
 
   It would expose EFI_SD_MMC_PASS_THRU_PROTOCOL for upper layer use.
 
   Copyright (c) 2018-2019, NVIDIA CORPORATION. All rights reserved.
   Copyright (c) 2015 - 2020, Intel Corporation. All rights reserved.<BR>
+  Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.<BR>
   SPDX-License-Identifier: BSD-2-Clause-Patent
 
 **/
@@ -39,7 +44,9 @@ EFI_DRIVER_BINDING_PROTOCOL  gSdMmcMemHcDriverBinding = {
 SD_MMC_HC_PRIVATE_DATA  gSdMmcMemHcTemplate = {
   SD_MMC_HC_PRIVATE_SIGNATURE,      // Signature
   NULL,                             // ControllerHandle
+  NULL,                             // Device
   NULL,                             // HcIo
+  { 0 },                            // IoData
   {                                 // PassThru
     sizeof (UINT32),
     SdMmcPassThruPassThru,
@@ -48,18 +55,12 @@ SD_MMC_HC_PRIVATE_DATA  gSdMmcMemHcTemplate = {
     SdMmcPassThruGetSlotNumber,
     SdMmcPassThruResetDevice
   },
-  0,                                // PciAttributes
   0,                                // PreviousSlot
   NULL,                             // TimerEvent
   NULL,                             // ConnectEvent
                                     // Queue
   INITIALIZE_LIST_HEAD_VARIABLE (gSdMmcMemHcTemplate.Queue),
   {                                 // Slot
-    SLOT_INIT_TEMPLATE,
-    SLOT_INIT_TEMPLATE,
-    SLOT_INIT_TEMPLATE,
-    SLOT_INIT_TEMPLATE,
-    SLOT_INIT_TEMPLATE,
     SLOT_INIT_TEMPLATE
   },
   {                                 // Capability
@@ -262,7 +263,7 @@ SdMmcMemHcEnumerateDevice (
     if ((Private->Slot[Slot].Enable) && (Private->Slot[Slot].SlotType == RemovableSlot)) {
       Status = SdMmcHcCardDetect (Private->HcIo, Slot, &MediaPresent);
       if ((Status == EFI_MEDIA_CHANGED) && !MediaPresent) {
-        DEBUG ((DEBUG_INFO, "SdMmcMemHcEnumerateDevice: device disconnected at slot %d of pci %p\n", Slot, Private->HcIo));
+        DEBUG ((DEBUG_INFO, "SdMmcMemHcEnumerateDevice: device disconnected at slot %d of controller %p\n", Slot, Private->ControllerHandle));
         Private->Slot[Slot].MediaPresent = FALSE;
         Private->Slot[Slot].Initialized  = FALSE;
         //
@@ -296,9 +297,9 @@ SdMmcMemHcEnumerateDevice (
       }
 
       if ((Status == EFI_MEDIA_CHANGED) && MediaPresent) {
-        DEBUG ((DEBUG_INFO, "SdMmcMemHcEnumerateDevice: device connected at slot %d of pci %p\n", Slot, Private->HcIo));
+        DEBUG ((DEBUG_INFO, "SdMmcMemHcEnumerateDevice: device connected at slot %d of controller %p\n", Slot, Private->ControllerHandle));
         //
-        // Reset the specified slot of the SD/MMC Pci Host Controller
+        // Reset the specified slot of the SD/MMC Host Controller
         //
         Status = SdMmcHcReset (Private, Slot);
         if (EFI_ERROR (Status)) {
@@ -350,46 +351,85 @@ SdMmcMemHcEnumerateDevice (
 }
 
 /**
-  Tests to see if this driver supports a given controller. If a child device is provided,
-  it further tests to see if this driver supports creating a handle for the specified child device.
+  Find the SDHCI register window in the resources of a non-discoverable
+  device.
 
-  This function checks to see if the driver specified by This supports the device specified by
-  ControllerHandle. Drivers will typically use the device path attached to
-  ControllerHandle and/or the services from the bus I/O abstraction attached to
-  ControllerHandle to determine if the driver supports ControllerHandle. This function
-  may be called many times during platform initialization. In order to reduce boot times, the tests
-  performed by this function must be very small, and take as little time as possible to execute. This
-  function must not change the state of any hardware devices, and this function must be aware that the
-  device specified by ControllerHandle may already be managed by the same driver or a
-  different driver. This function must match its calls to AllocatePages() with FreePages(),
-  AllocatePool() with FreePool(), and OpenProtocol() with CloseProtocol().
-  Since ControllerHandle may have been previously started by the same driver, if a protocol is
-  already in the opened state, then it must not be closed with CloseProtocol(). This is required
-  to guarantee the state of ControllerHandle is not modified by this function.
+  The first memory descriptor is taken as the SDHCI register window. Any
+  non-memory descriptor makes the device unsupported.
+
+  @param[in]   Device    The non-discoverable device.
+  @param[out]  MmioBase  Base address of the register window.
+  @param[out]  MmioSize  Size of the register window, in bytes.
+
+  @retval EFI_SUCCESS      A usable register window was found.
+  @retval EFI_UNSUPPORTED  The resources do not describe a usable register
+                           window.
+
+**/
+STATIC
+EFI_STATUS
+SdMmcMemHcGetMmioResource (
+  IN  NON_DISCOVERABLE_DEVICE  *Device,
+  OUT EFI_PHYSICAL_ADDRESS     *MmioBase,
+  OUT UINT64                   *MmioSize
+  )
+{
+  EFI_ACPI_ADDRESS_SPACE_DESCRIPTOR  *Desc;
+  BOOLEAN                            Found;
+
+  if (Device->Resources == NULL) {
+    return EFI_UNSUPPORTED;
+  }
+
+  Found = FALSE;
+  for (Desc = Device->Resources; Desc->Desc != ACPI_END_TAG_DESCRIPTOR;
+       Desc = (VOID *)((UINT8 *)Desc + Desc->Len + 3))
+  {
+    if ((Desc->Desc != ACPI_ADDRESS_SPACE_DESCRIPTOR) ||
+        (Desc->ResType != ACPI_ADDRESS_SPACE_TYPE_MEM))
+    {
+      return EFI_UNSUPPORTED;
+    }
+
+    if (!Found) {
+      *MmioBase = Desc->AddrRangeMin;
+      *MmioSize = Desc->AddrLen;
+      Found     = TRUE;
+    }
+  }
+
+  if (!Found || (*MmioSize < SD_MMC_HC_MIN_MMIO_SIZE)) {
+    return EFI_UNSUPPORTED;
+  }
+
+  //
+  // The whole window must be addressable through a UINTN, since it is
+  // accessed with the MMIO functions of IoLib.
+  //
+  if ((*MmioBase > MAX_UINTN) || (*MmioSize - 1 > MAX_UINTN - *MmioBase)) {
+    return EFI_UNSUPPORTED;
+  }
+
+  return EFI_SUCCESS;
+}
+
+/**
+  Tests to see if this driver supports a given controller.
+
+  The controller is supported if it carries EDKII_NON_DISCOVERABLE_DEVICE with
+  a Type of EDKII_NON_DISCOVERABLE_SDHCI_MMIO_DEVICE_GUID and its resources
+  describe a usable register window.
 
   @param[in]  This                 A pointer to the EFI_DRIVER_BINDING_PROTOCOL instance.
-  @param[in]  ControllerHandle     The handle of the controller to test. This handle
-                                   must support a protocol interface that supplies
-                                   an I/O abstraction to the driver.
-  @param[in]  RemainingDevicePath  A pointer to the remaining portion of a device path.  This
-                                   parameter is ignored by device drivers, and is optional for bus
-                                   drivers. For bus drivers, if this parameter is not NULL, then
-                                   the bus driver must determine if the bus controller specified
-                                   by ControllerHandle and the child controller specified
-                                   by RemainingDevicePath are both supported by this
-                                   bus driver.
+  @param[in]  Controller           The handle of the controller to test.
+  @param[in]  RemainingDevicePath  Ignored; this is a device driver.
 
-  @retval EFI_SUCCESS              The device specified by ControllerHandle and
-                                   RemainingDevicePath is supported by the driver specified by This.
-  @retval EFI_ALREADY_STARTED      The device specified by ControllerHandle and
-                                   RemainingDevicePath is already being managed by the driver
-                                   specified by This.
-  @retval EFI_ACCESS_DENIED        The device specified by ControllerHandle and
-                                   RemainingDevicePath is already being managed by a different
-                                   driver or an application that requires exclusive access.
-                                   Currently not implemented.
-  @retval EFI_UNSUPPORTED          The device specified by ControllerHandle and
-                                   RemainingDevicePath is not supported by the driver specified by This.
+  @retval EFI_SUCCESS              The device is supported by this driver.
+  @retval EFI_ALREADY_STARTED      The device is already being managed by this driver.
+  @retval EFI_ACCESS_DENIED        The device is already being managed by a different
+                                   driver.
+  @retval EFI_UNSUPPORTED          The device is not supported by this driver.
+
 **/
 EFI_STATUS
 EFIAPI
@@ -399,50 +439,15 @@ SdMmcMemHcDriverBindingSupported (
   IN EFI_DEVICE_PATH_PROTOCOL     *RemainingDevicePath
   )
 {
-  EFI_STATUS                Status;
-  EFI_DEVICE_PATH_PROTOCOL  *ParentDevicePath;
-  SD_MMC_HC_IO       *HcIo;
-  PCI_TYPE00                PciData;
+  EFI_STATUS               Status;
+  NON_DISCOVERABLE_DEVICE  *Device;
+  EFI_PHYSICAL_ADDRESS     MmioBase;
+  UINT64                   MmioSize;
 
-  HcIo            = NULL;
-  ParentDevicePath = NULL;
-
-  //
-  // SdPciHcDxe is a device driver, and should ingore the
-  // "RemainingDevicePath" according to EFI spec.
-  //
   Status = gBS->OpenProtocol (
                   Controller,
-                  &gEfiDevicePathProtocolGuid,
-                  (VOID *)&ParentDevicePath,
-                  This->DriverBindingHandle,
-                  Controller,
-                  EFI_OPEN_PROTOCOL_BY_DRIVER
-                  );
-  if (EFI_ERROR (Status)) {
-    //
-    // EFI_ALREADY_STARTED is also an error.
-    //
-    return Status;
-  }
-
-  //
-  // Close the protocol because we don't use it here.
-  //
-  gBS->CloseProtocol (
-         Controller,
-         &gEfiDevicePathProtocolGuid,
-         This->DriverBindingHandle,
-         Controller
-         );
-
-  //
-  // Now test the EfiPciIoProtocol.
-  //
-  Status = gBS->OpenProtocol (
-                  Controller,
-                  &gEfiPciIoProtocolGuid,
-                  (VOID **)&HcIo,
+                  &gEdkiiNonDiscoverableDeviceProtocolGuid,
+                  (VOID **)&Device,
                   This->DriverBindingHandle,
                   Controller,
                   EFI_OPEN_PROTOCOL_BY_DRIVER
@@ -451,85 +456,40 @@ SdMmcMemHcDriverBindingSupported (
     return Status;
   }
 
-  //
-  // Now further check the PCI header: Base class (offset 0x08) and
-  // Sub Class (offset 0x05). This controller should be an SD/MMC PCI
-  // Host Controller.
-  //
-  Status = HcIo->Pci.Read (
-                        HcIo,
-                        EfiPciIoWidthUint8,
-                        0,
-                        sizeof (PciData),
-                        &PciData
-                        );
-  if (EFI_ERROR (Status)) {
-    gBS->CloseProtocol (
-           Controller,
-           &gEfiPciIoProtocolGuid,
-           This->DriverBindingHandle,
-           Controller
-           );
-    return EFI_UNSUPPORTED;
-  }
-
-  //
-  // Since we already got the PciData, we can close protocol to avoid to carry it
-  // on for multiple exit points.
-  //
-  gBS->CloseProtocol (
-         Controller,
-         &gEfiPciIoProtocolGuid,
-         This->DriverBindingHandle,
-         Controller
-         );
-
-  //
-  // Examine SD PCI Host Controller PCI Configuration table fields.
-  //
-  if ((PciData.Hdr.ClassCode[2] == PCI_CLASS_SYSTEM_PERIPHERAL) &&
-      (PciData.Hdr.ClassCode[1] == PCI_SUBCLASS_SD_HOST_CONTROLLER) &&
-      ((PciData.Hdr.ClassCode[0] == 0x00) || (PciData.Hdr.ClassCode[0] == 0x01)))
+  if ((Device->Type == NULL) ||
+      !CompareGuid (Device->Type, &gEdkiiNonDiscoverableSdhciMmioDeviceGuid) ||
+      (Device->DmaType >= NonDiscoverableDeviceDmaTypeMax))
   {
-    return EFI_SUCCESS;
+    Status = EFI_UNSUPPORTED;
+  } else {
+    Status = SdMmcMemHcGetMmioResource (Device, &MmioBase, &MmioSize);
   }
 
-  return EFI_UNSUPPORTED;
+  gBS->CloseProtocol (
+         Controller,
+         &gEdkiiNonDiscoverableDeviceProtocolGuid,
+         This->DriverBindingHandle,
+         Controller
+         );
+
+  return Status;
 }
 
 /**
-  Starts a device controller or a bus controller.
+  Starts managing a memory-mapped SD/MMC host controller.
 
-  The Start() function is designed to be invoked from the EFI boot service ConnectController().
-  As a result, much of the error checking on the parameters to Start() has been moved into this
-  common boot service. It is legal to call Start() from other locations,
-  but the following calling restrictions must be followed or the system behavior will not be deterministic.
-  1. ControllerHandle must be a valid EFI_HANDLE.
-  2. If RemainingDevicePath is not NULL, then it must be a pointer to a naturally aligned
-     EFI_DEVICE_PATH_PROTOCOL.
-  3. Prior to calling Start(), the Supported() function for the driver specified by This must
-     have been called with the same calling parameters, and Supported() must have returned EFI_SUCCESS.
+  Opens EDKII_NON_DISCOVERABLE_DEVICE BY_DRIVER, runs the device's
+  Initialize() hook, initializes the slot and the card in it, and installs
+  EFI_SD_MMC_PASS_THRU_PROTOCOL on the controller handle.
 
   @param[in]  This                 A pointer to the EFI_DRIVER_BINDING_PROTOCOL instance.
-  @param[in]  ControllerHandle     The handle of the controller to start. This handle
-                                   must support a protocol interface that supplies
-                                   an I/O abstraction to the driver.
-  @param[in]  RemainingDevicePath  A pointer to the remaining portion of a device path.  This
-                                   parameter is ignored by device drivers, and is optional for bus
-                                   drivers. For a bus driver, if this parameter is NULL, then handles
-                                   for all the children of Controller are created by this driver.
-                                   If this parameter is not NULL and the first Device Path Node is
-                                   not the End of Device Path Node, then only the handle for the
-                                   child device specified by the first Device Path Node of
-                                   RemainingDevicePath is created by this driver.
-                                   If the first Device Path Node of RemainingDevicePath is
-                                   the End of Device Path Node, no child handle is created by this
-                                   driver.
+  @param[in]  Controller           The handle of the controller to start.
+  @param[in]  RemainingDevicePath  Ignored; this is a device driver.
 
   @retval EFI_SUCCESS              The device was started.
-  @retval EFI_DEVICE_ERROR         The device could not be started due to a device error.Currently not implemented.
   @retval EFI_OUT_OF_RESOURCES     The request could not be completed due to a lack of resources.
-  @retval Others                   The driver failded to start the device.
+  @retval EFI_DEVICE_ERROR         The CPU DMA alignment is not usable.
+  @retval Others                   The driver failed to start the device.
 
 **/
 EFI_STATUS
@@ -542,69 +502,28 @@ SdMmcMemHcDriverBindingStart (
 {
   EFI_STATUS                Status;
   SD_MMC_HC_PRIVATE_DATA    *Private;
-  SD_MMC_HC_IO       *HcIo;
-  UINT64                    Supports;
-  UINT64                    PciAttributes;
-  UINT8                     SlotNum;
-  UINT8                     FirstBar;
+  NON_DISCOVERABLE_DEVICE   *Device;
+  SD_MMC_HC_IO              *HcIo;
+  EFI_CPU_ARCH_PROTOCOL     *Cpu;
+  EFI_PHYSICAL_ADDRESS      MmioBase;
   UINT8                     Slot;
   UINT8                     Index;
   CARD_TYPE_DETECT_ROUTINE  *Routine;
   UINT32                    RoutineNum;
   BOOLEAN                   MediaPresent;
-  BOOLEAN                   Support64BitDma;
 
   DEBUG ((DEBUG_INFO, "SdMmcMemHcDriverBindingStart: Start\n"));
 
-  //
-  // Open PCI I/O Protocol and save pointer to open protocol
-  // in private data area.
-  //
-  HcIo  = NULL;
   Status = gBS->OpenProtocol (
                   Controller,
-                  &gEfiPciIoProtocolGuid,
-                  (VOID **)&HcIo,
+                  &gEdkiiNonDiscoverableDeviceProtocolGuid,
+                  (VOID **)&Device,
                   This->DriverBindingHandle,
                   Controller,
                   EFI_OPEN_PROTOCOL_BY_DRIVER
                   );
   if (EFI_ERROR (Status)) {
     return Status;
-  }
-
-  //
-  // Enable the SD Host Controller MMIO space
-  //
-  Private = NULL;
-  Status  = HcIo->Attributes (
-                     HcIo,
-                     EfiPciIoAttributeOperationGet,
-                     0,
-                     &PciAttributes
-                     );
-
-  if (EFI_ERROR (Status)) {
-    goto Done;
-  }
-
-  Status = HcIo->Attributes (
-                    HcIo,
-                    EfiPciIoAttributeOperationSupported,
-                    0,
-                    &Supports
-                    );
-
-  if (!EFI_ERROR (Status)) {
-    Supports &= (UINT64)EFI_PCI_DEVICE_ENABLE;
-    Status    = HcIo->Attributes (
-                         HcIo,
-                         EfiPciIoAttributeOperationEnable,
-                         Supports,
-                         NULL
-                         );
-  } else {
-    goto Done;
   }
 
   Private = AllocateCopyPool (sizeof (SD_MMC_HC_PRIVATE_DATA), &gSdMmcMemHcTemplate);
@@ -614,16 +533,50 @@ SdMmcMemHcDriverBindingStart (
   }
 
   Private->ControllerHandle = Controller;
-  Private->HcIo            = HcIo;
-  Private->PciAttributes    = PciAttributes;
+  Private->Device           = Device;
+  Private->HcIo             = &Private->IoData;
+  HcIo                      = Private->HcIo;
   InitializeListHead (&Private->Queue);
 
-  //
-  // Get SD/MMC Pci Host Controller Slot info
-  //
-  Status = SdMmcHcGetSlotInfo (HcIo, &FirstBar, &SlotNum);
+  Status = SdMmcMemHcGetMmioResource (Device, &MmioBase, &HcIo->MmioSize);
   if (EFI_ERROR (Status)) {
     goto Done;
+  }
+
+  HcIo->MmioBase    = (UINTN)MmioBase;
+  HcIo->DmaCoherent = (BOOLEAN)(Device->DmaType == NonDiscoverableDeviceDmaTypeCoherent);
+
+  //
+  // Non-coherent DMA needs the CPU data cache line size to decide which
+  // buffers can have their cache lines invalidated in place. As a
+  // UEFI_DRIVER this module only runs once the CPU Architectural Protocol
+  // is installed.
+  //
+  HcIo->DmaAlignment = 1;
+  if (!HcIo->DmaCoherent) {
+    Status = gBS->LocateProtocol (&gEfiCpuArchProtocolGuid, NULL, (VOID **)&Cpu);
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_ERROR, "%a: CPU Arch Protocol not found - %r\n", __func__, Status));
+      goto Done;
+    }
+
+    HcIo->DmaAlignment = Cpu->DmaBufferAlignment;
+    if ((HcIo->DmaAlignment == 0) ||
+        ((HcIo->DmaAlignment & (HcIo->DmaAlignment - 1)) != 0) ||
+        (HcIo->DmaAlignment > EFI_PAGE_SIZE))
+    {
+      DEBUG ((DEBUG_ERROR, "%a: unusable CPU DmaBufferAlignment 0x%x\n", __func__, HcIo->DmaAlignment));
+      Status = EFI_DEVICE_ERROR;
+      goto Done;
+    }
+  }
+
+  if (Device->Initialize != NULL) {
+    Status = Device->Initialize (Device);
+    if (EFI_ERROR (Status)) {
+      DEBUG ((DEBUG_ERROR, "%a: device Initialize() failed - %r\n", __func__, Status));
+      goto Done;
+    }
   }
 
   //
@@ -646,11 +599,14 @@ SdMmcMemHcDriverBindingStart (
     }
   }
 
-  Support64BitDma = TRUE;
-  for (Slot = FirstBar; Slot < (FirstBar + SlotNum); Slot++) {
+  //
+  // A memory-mapped controller has a single slot. The loop is kept so the
+  // body matches SdMmcPciHcDxe, and "continue" leaves the slot disabled.
+  //
+  for (Slot = 0; Slot < SD_MMC_HC_MAX_SLOT; Slot++) {
     Private->Slot[Slot].Enable = TRUE;
     //
-    // Get SD/MMC Pci Host Controller Version
+    // Get SD/MMC Host Controller Version
     //
     Status = SdMmcHcGetControllerVersion (HcIo, Slot, &Private->ControllerVersion[Slot]);
     if (EFI_ERROR (Status)) {
@@ -705,18 +661,17 @@ SdMmcMemHcDriverBindingStart (
       ));
 
     //
-    // If any of the slots does not support 64b system bus
-    // do not enable 64b DMA in the PCI layer.
+    // Keep DMA buffers below 4 GB unless the (possibly overridden)
+    // capabilities advertise 64-bit system addressing. Controllers older
+    // than SDHCI 3.00 have no 64-bit system bus.
     //
-    if (((Private->ControllerVersion[Slot] == SD_MMC_HC_CTRL_VER_300) &&
-         (Private->Capability[Slot].SysBus64V3 == 0)) ||
-        ((Private->ControllerVersion[Slot] == SD_MMC_HC_CTRL_VER_400) &&
-         (Private->Capability[Slot].SysBus64V3 == 0)) ||
-        ((Private->ControllerVersion[Slot] >= SD_MMC_HC_CTRL_VER_410) &&
-         (Private->Capability[Slot].SysBus64V4 == 0)))
-    {
-      Support64BitDma = FALSE;
-    }
+    HcIo->Dma64 = (BOOLEAN) !(((Private->ControllerVersion[Slot] == SD_MMC_HC_CTRL_VER_300) &&
+                               (Private->Capability[Slot].SysBus64V3 == 0)) ||
+                              ((Private->ControllerVersion[Slot] == SD_MMC_HC_CTRL_VER_400) &&
+                               (Private->Capability[Slot].SysBus64V3 == 0)) ||
+                              ((Private->ControllerVersion[Slot] >= SD_MMC_HC_CTRL_VER_410) &&
+                               (Private->Capability[Slot].SysBus64V4 == 0)) ||
+                              (Private->ControllerVersion[Slot] < SD_MMC_HC_CTRL_VER_300));
 
     Status = SdMmcHcGetMaxCurrent (HcIo, Slot, &Private->MaxCurrent[Slot]);
     if (EFI_ERROR (Status)) {
@@ -730,7 +685,7 @@ SdMmcMemHcDriverBindingStart (
     }
 
     //
-    // Reset the specified slot of the SD/MMC Pci Host Controller
+    // Reset the specified slot of the SD/MMC Host Controller
     //
     Status = SdMmcHcReset (Private, Slot);
     if (EFI_ERROR (Status)) {
@@ -781,22 +736,6 @@ SdMmcMemHcDriverBindingStart (
   }
 
   //
-  // Enable 64-bit DMA support in the PCI layer if this controller
-  // supports it.
-  //
-  if (Support64BitDma) {
-    Status = HcIo->Attributes (
-                      HcIo,
-                      EfiPciIoAttributeOperationEnable,
-                      EFI_PCI_IO_ATTRIBUTE_DUAL_ADDRESS_CYCLE,
-                      NULL
-                      );
-    if (EFI_ERROR (Status)) {
-      DEBUG ((DEBUG_WARN, "SdMmcMemHcDriverBindingStart: failed to enable 64-bit DMA (%r)\n", Status));
-    }
-  }
-
-  //
   // Start the asynchronous I/O monitor
   //
   Status = gBS->CreateEvent (
@@ -841,25 +780,21 @@ SdMmcMemHcDriverBindingStart (
                   NULL
                   );
 
-  DEBUG ((DEBUG_INFO, "SdMmcMemHcDriverBindingStart: %r End on %x\n", Status, Controller));
+  DEBUG ((
+    DEBUG_INFO,
+    "SdMmcMemHcDriverBindingStart: %r End on %p, base 0x%lx, %a DMA, %a addressing\n",
+    Status,
+    Controller,
+    (UINT64)HcIo->MmioBase,
+    HcIo->DmaCoherent ? "coherent" : "non-coherent",
+    HcIo->Dma64 ? "64-bit" : "32-bit"
+    ));
 
 Done:
   if (EFI_ERROR (Status)) {
-    if ((Private != NULL) && (Private->PciAttributes != 0)) {
-      //
-      // Restore original PCI attributes
-      //
-      HcIo->Attributes (
-               HcIo,
-               EfiPciIoAttributeOperationSet,
-               Private->PciAttributes,
-               NULL
-               );
-    }
-
     gBS->CloseProtocol (
            Controller,
-           &gEfiPciIoProtocolGuid,
+           &gEdkiiNonDiscoverableDeviceProtocolGuid,
            This->DriverBindingHandle,
            Controller
            );
@@ -918,7 +853,6 @@ SdMmcMemHcDriverBindingStop (
   EFI_STATUS                     Status;
   EFI_SD_MMC_PASS_THRU_PROTOCOL  *PassThru;
   SD_MMC_HC_PRIVATE_DATA         *Private;
-  SD_MMC_HC_IO            *HcIo;
   LIST_ENTRY                     *Link;
   LIST_ENTRY                     *NextLink;
   SD_MMC_HC_TRB                  *Trb;
@@ -982,21 +916,10 @@ SdMmcMemHcDriverBindingStop (
 
   gBS->CloseProtocol (
          Controller,
-         &gEfiPciIoProtocolGuid,
+         &gEdkiiNonDiscoverableDeviceProtocolGuid,
          This->DriverBindingHandle,
          Controller
          );
-  //
-  // Restore original PCI attributes
-  //
-  HcIo  = Private->HcIo;
-  Status = HcIo->Attributes (
-                    HcIo,
-                    EfiPciIoAttributeOperationSet,
-                    Private->PciAttributes,
-                    NULL
-                    );
-  ASSERT_EFI_ERROR (Status);
 
   FreePool (Private);
 

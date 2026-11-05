@@ -1,12 +1,17 @@
 ## @file
-#  SdMmcMemHcDxe driver is used to manage those host controllers which comply with SD
-#  Host Controller Simplified Specification version 3.0 plus the 64-bit System Addressing
-#  support in SD Host Controller Simplified Specification version 4.20.
+#  SdMmcMemHcDxe driver is used to manage memory-mapped host controllers which
+#  comply with SD Host Controller Simplified Specification version 3.0 plus the
+#  64-bit System Addressing support in SD Host Controller Simplified
+#  Specification version 4.20.
 #
-#  It will produce EFI_SD_MMC_PASS_THRU_PROTOCOL to allow sending SD/MMC/eMMC cmds
-#  to specified devices from upper layer.
+#  Platforms describe each controller with EDKII_NON_DISCOVERABLE_DEVICE using
+#  the EDKII_NON_DISCOVERABLE_SDHCI_MMIO_DEVICE_GUID type. It is the
+#  memory-mapped counterpart of SdMmcPciHcDxe, and produces
+#  EFI_SD_MMC_PASS_THRU_PROTOCOL to allow sending SD/MMC/eMMC cmds to
+#  specified devices from upper layer.
 #
 #  Copyright (c) 2015 - 2019, Intel Corporation. All rights reserved.<BR>
+#  Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.<BR>
 #
 #  SPDX-License-Identifier: BSD-2-Clause-Patent
 #
@@ -17,7 +22,7 @@
   INF_VERSION                    = 0x00010005
   BASE_NAME                      = SdMmcMemHcDxe
   MODULE_UNI_FILE                = SdMmcMemHcDxe.uni
-  FILE_GUID                      = 8E325979-3FE1-4927-AAE2-8F5C4BD2AF0D
+  FILE_GUID                      = DB9A58FC-5199-4172-AF3E-3EBDAC3F8F9C
   MODULE_TYPE                    = UEFI_DRIVER
   VERSION_STRING                 = 1.0
   ENTRY_POINT                    = InitializeSdMmcMemHcDxe
@@ -25,11 +30,11 @@
 #
 # The following information is for reference only and not required by the build tools.
 #
-#  VALID_ARCHITECTURES           = IA32 X64 EBC
+#  VALID_ARCHITECTURES           = IA32 X64 ARM AARCH64 RISCV64 LOONGARCH64
 #
-#  DRIVER_BINDING                =  gSdMmcMemHcDxeDriverBinding
-#  COMPONENT_NAME                =  gSdMmcMemHcDxeComponentName
-#  COMPONENT_NAME2               =  gSdMmcMemHcDxeComponentName2
+#  DRIVER_BINDING                =  gSdMmcMemHcDriverBinding
+#  COMPONENT_NAME                =  gSdMmcMemHcComponentName
+#  COMPONENT_NAME2               =  gSdMmcMemHcComponentName2
 #
 #
 
@@ -38,6 +43,7 @@
   SdMmcMemHcDxe.c
   EmmcDevice.c
   SdDevice.c
+  SdMmcMemDma.c
   SdMmcMemHci.h
   SdMmcMemHci.c
   ComponentName.c
@@ -47,21 +53,26 @@
   MdeModulePkg/MdeModulePkg.dec
 
 [LibraryClasses]
-  DevicePathLib
-  UefiBootServicesTableLib
-  UefiRuntimeServicesTableLib
-  MemoryAllocationLib
-  BaseMemoryLib
-  UefiLib
   BaseLib
-  UefiDriverEntryPoint
+  BaseMemoryLib
+  CacheMaintenanceLib
   DebugLib
+  DevicePathLib
+  DxeServicesTableLib
+  IoLib
+  MemoryAllocationLib
   PcdLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+  UefiLib
+
+[Guids]
+  gEdkiiNonDiscoverableSdhciMmioDeviceGuid      ## CONSUMES ## GUID
 
 [Protocols]
+  gEdkiiNonDiscoverableDeviceProtocolGuid       ## TO_START
   gEdkiiSdMmcOverrideProtocolGuid               ## SOMETIMES_CONSUMES
-  gEfiDevicePathProtocolGuid                    ## TO_START
-  gEfiPciIoProtocolGuid                         ## TO_START
+  gEfiCpuArchProtocolGuid                       ## SOMETIMES_CONSUMES
   gEfiSdMmcPassThruProtocolGuid                 ## BY_START
 
 # [Event]

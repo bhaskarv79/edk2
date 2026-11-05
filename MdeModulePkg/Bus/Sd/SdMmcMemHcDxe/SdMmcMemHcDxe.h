@@ -4,29 +4,37 @@
 
 Copyright (c) 2018-2019, NVIDIA CORPORATION. All rights reserved.
 Copyright (c) 2015 - 2020, Intel Corporation. All rights reserved.<BR>
+Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.<BR>
 SPDX-License-Identifier: BSD-2-Clause-Patent
 
 **/
 
 #pragma once
 
-#include <Uefi.h>
+#include <PiDxe.h>
 
-#include <IndustryStandard/Pci.h>
+#include <IndustryStandard/Acpi.h>
 #include <IndustryStandard/Emmc.h>
 #include <IndustryStandard/Sd.h>
+
+#include <Guid/NonDiscoverableDevice.h>
 
 #include <Library/UefiDriverEntryPoint.h>
 #include <Library/DebugLib.h>
 #include <Library/UefiBootServicesTableLib.h>
+#include <Library/BaseLib.h>
 #include <Library/BaseMemoryLib.h>
+#include <Library/CacheMaintenanceLib.h>
+#include <Library/DxeServicesTableLib.h>
+#include <Library/IoLib.h>
 #include <Library/MemoryAllocationLib.h>
 #include <Library/UefiLib.h>
 #include <Library/DevicePathLib.h>
 #include <Library/PcdLib.h>
 
+#include <Protocol/Cpu.h>
 #include <Protocol/DevicePath.h>
-#include <Protocol/HcIo.h>
+#include <Protocol/NonDiscoverableDevice.h>
 #include <Protocol/DriverBinding.h>
 #include <Protocol/ComponentName.h>
 #include <Protocol/ComponentName2.h>
@@ -91,11 +99,16 @@ typedef struct {
   UINTN                            Signature;
 
   EFI_HANDLE                       ControllerHandle;
-  SD_MMC_HC_IO              *HcIo;
+  NON_DISCOVERABLE_DEVICE          *Device;
+  //
+  // HcIo points at IoData. Code shared with SdMmcPciHcDxe uses HcIo where
+  // that driver uses its EFI_PCI_IO_PROTOCOL.
+  //
+  SD_MMC_HC_IO                     *HcIo;
+  SD_MMC_HC_IO                     IoData;
 
   EFI_SD_MMC_PASS_THRU_PROTOCOL    PassThru;
 
-  UINT64                           PciAttributes;
   //
   // The field is used to record the previous slot in GetNextSlot().
   //

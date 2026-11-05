@@ -492,7 +492,7 @@ EmmcSendTuningBlk (
   Refer to EMMC Electrical Standard Spec 5.1 Section 6.6.8 and SD Host Controller
   Simplified Spec 3.0 Figure 2-29 for details.
 
-  @param[in] HcIo          A pointer to the SD_MMC_HC_IO instance.
+  @param[in] HcIo          The host controller I/O context.
   @param[in] PassThru       A pointer to the EFI_SD_MMC_PASS_THRU_PROTOCOL instance.
   @param[in] Slot           The slot number of the SD card to send the command to.
   @param[in] BusWidth       The bus width to work.
@@ -503,7 +503,7 @@ EmmcSendTuningBlk (
 **/
 EFI_STATUS
 EmmcTuningClkForHs200 (
-  IN SD_MMC_HC_IO            *HcIo,
+  IN SD_MMC_HC_IO                   *HcIo,
   IN EFI_SD_MMC_PASS_THRU_PROTOCOL  *PassThru,
   IN UINT8                          Slot,
   IN UINT8                          BusWidth
@@ -603,7 +603,7 @@ EmmcCheckSwitchStatus (
   Refer to EMMC Electrical Standard Spec 5.1 Section 6.6.9 and SD Host Controller
   Simplified Spec 3.0 Figure 3-7 for details.
 
-  @param[in] HcIo          A pointer to the SD_MMC_HC_IO instance.
+  @param[in] HcIo          The host controller I/O context.
   @param[in] PassThru       A pointer to the EFI_SD_MMC_PASS_THRU_PROTOCOL instance.
   @param[in] Slot           The slot number of the SD card to send the command to.
   @param[in] Rca            The relative device address to be assigned.
@@ -617,7 +617,7 @@ EmmcCheckSwitchStatus (
 **/
 EFI_STATUS
 EmmcSwitchBusWidth (
-  IN SD_MMC_HC_IO            *HcIo,
+  IN SD_MMC_HC_IO                   *HcIo,
   IN EFI_SD_MMC_PASS_THRU_PROTOCOL  *PassThru,
   IN UINT8                          Slot,
   IN UINT16                         Rca,
@@ -671,7 +671,7 @@ EmmcSwitchBusWidth (
   Refer to EMMC Electrical Standard Spec 5.1 Section 6.6 and SD Host Controller
   Simplified Spec 3.0 Figure 3-3 for details.
 
-  @param[in] HcIo           A pointer to the SD_MMC_HC_IO instance.
+  @param[in] HcIo           The host controller I/O context.
   @param[in] PassThru        A pointer to the EFI_SD_MMC_PASS_THRU_PROTOCOL instance.
   @param[in] Slot            The slot number of the SD card to send the command to.
   @param[in] Rca             The relative device address to be assigned.
@@ -685,7 +685,7 @@ EmmcSwitchBusWidth (
 **/
 EFI_STATUS
 EmmcSwitchBusTiming (
-  IN SD_MMC_HC_IO            *HcIo,
+  IN SD_MMC_HC_IO                   *HcIo,
   IN EFI_SD_MMC_PASS_THRU_PROTOCOL  *PassThru,
   IN UINT8                          Slot,
   IN UINT16                         Rca,
@@ -799,7 +799,7 @@ EmmcSwitchBusTiming (
   Refer to EMMC Electrical Standard Spec 5.1 Section 6.6.8 and SD Host Controller
   Simplified Spec 3.0 Figure 2-29 for details.
 
-  @param[in] HcIo          A pointer to the SD_MMC_HC_IO instance.
+  @param[in] HcIo          The host controller I/O context.
   @param[in] PassThru       A pointer to the EFI_SD_MMC_PASS_THRU_PROTOCOL instance.
   @param[in] Slot           The slot number of the SD card to send the command to.
   @param[in] Rca            The relative device address to be assigned.
@@ -811,7 +811,7 @@ EmmcSwitchBusTiming (
 **/
 EFI_STATUS
 EmmcSwitchToHighSpeed (
-  IN SD_MMC_HC_IO            *HcIo,
+  IN SD_MMC_HC_IO                   *HcIo,
   IN EFI_SD_MMC_PASS_THRU_PROTOCOL  *PassThru,
   IN UINT8                          Slot,
   IN UINT16                         Rca,
@@ -847,7 +847,7 @@ EmmcSwitchToHighSpeed (
   Refer to EMMC Electrical Standard Spec 5.1 Section 6.6.8 and SD Host Controller
   Simplified Spec 3.0 Figure 2-29 for details.
 
-  @param[in] HcIo           A pointer to the SD_MMC_HC_IO instance.
+  @param[in] HcIo           The host controller I/O context.
   @param[in] PassThru        A pointer to the EFI_SD_MMC_PASS_THRU_PROTOCOL instance.
   @param[in] Slot            The slot number of the SD card to send the command to.
   @param[in] Rca             The relative device address to be assigned.
@@ -859,7 +859,7 @@ EmmcSwitchToHighSpeed (
 **/
 EFI_STATUS
 EmmcSwitchToHS200 (
-  IN SD_MMC_HC_IO            *HcIo,
+  IN SD_MMC_HC_IO                   *HcIo,
   IN EFI_SD_MMC_PASS_THRU_PROTOCOL  *PassThru,
   IN UINT8                          Slot,
   IN UINT16                         Rca,
@@ -895,7 +895,7 @@ EmmcSwitchToHS200 (
   Refer to EMMC Electrical Standard Spec 5.1 Section 6.6.8 and SD Host Controller
   Simplified Spec 3.0 Figure 2-29 for details.
 
-  @param[in] HcIo           A pointer to the SD_MMC_HC_IO instance.
+  @param[in] HcIo           The host controller I/O context.
   @param[in] PassThru        A pointer to the EFI_SD_MMC_PASS_THRU_PROTOCOL instance.
   @param[in] Slot            The slot number of the SD card to send the command to.
   @param[in] Rca             The relative device address to be assigned.
@@ -907,7 +907,7 @@ EmmcSwitchToHS200 (
 **/
 EFI_STATUS
 EmmcSwitchToHS400 (
-  IN SD_MMC_HC_IO            *HcIo,
+  IN SD_MMC_HC_IO                   *HcIo,
   IN EFI_SD_MMC_PASS_THRU_PROTOCOL  *PassThru,
   IN UINT8                          Slot,
   IN UINT16                         Rca,
@@ -1224,7 +1224,7 @@ EmmcGetTargetBusMode (
   Refer to EMMC Electrical Standard Spec 5.1 Section 6.6.8 and SD Host Controller
   Simplified Spec 3.0 Figure 2-29 for details.
 
-  @param[in] HcIo          A pointer to the SD_MMC_HC_IO instance.
+  @param[in] HcIo          The host controller I/O context.
   @param[in] PassThru       A pointer to the EFI_SD_MMC_PASS_THRU_PROTOCOL instance.
   @param[in] Slot           The slot number of the SD card to send the command to.
   @param[in] Rca            The relative device address to be assigned.
@@ -1235,7 +1235,7 @@ EmmcGetTargetBusMode (
 **/
 EFI_STATUS
 EmmcSetBusMode (
-  IN SD_MMC_HC_IO            *HcIo,
+  IN SD_MMC_HC_IO                   *HcIo,
   IN EFI_SD_MMC_PASS_THRU_PROTOCOL  *PassThru,
   IN UINT8                          Slot,
   IN UINT16                         Rca
@@ -1321,13 +1321,13 @@ EmmcIdentification (
   )
 {
   EFI_STATUS                     Status;
-  SD_MMC_HC_IO            *HcIo;
+  SD_MMC_HC_IO                   *HcIo;
   EFI_SD_MMC_PASS_THRU_PROTOCOL  *PassThru;
   UINT32                         Ocr;
   UINT16                         Rca;
   UINTN                          Retry;
 
-  HcIo    = Private->HcIo;
+  HcIo     = Private->HcIo;
   PassThru = &Private->PassThru;
 
   Status = EmmcReset (PassThru, Slot);
