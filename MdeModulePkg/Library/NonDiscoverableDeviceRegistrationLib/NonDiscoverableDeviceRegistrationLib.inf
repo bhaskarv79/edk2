@@ -40,3 +40,4 @@
   gEdkiiNonDiscoverableUfsDeviceGuid     ## CONSUMES   ## GUID
   gEdkiiNonDiscoverableUhciDeviceGuid    ## CONSUMES   ## GUID
   gEdkiiNonDiscoverableXhciDeviceGuid    ## CONSUMES   ## GUID
+  gEdkiiNonDiscoverableUfsMmioDeviceGuid ## CONSUMES   ## GUID

@@ -37,6 +37,15 @@
 #define EDKII_NON_DISCOVERABLE_XHCI_DEVICE_GUID \
   { 0xB1BE0BC5, 0x6C28, 0x442D, {0xAA, 0x37, 0x15, 0x1B, 0x42, 0x57, 0xBD, 0x78 } }
 
+//
+// A UFSHCI-compliant UFS host controller that is driven natively through its
+// MMIO register window (UfsMemHcDxe), rather than through the PCI I/O
+// emulation that NonDiscoverablePciDeviceDxe provides for
+// EDKII_NON_DISCOVERABLE_UFS_DEVICE_GUID.
+//
+#define EDKII_NON_DISCOVERABLE_UFS_MMIO_DEVICE_GUID \
+  { 0xFA19CA13, 0xF4B7, 0x4C05, {0xA1, 0xA4, 0x09, 0xA8, 0x83, 0x66, 0xD6, 0x81 } }
+
 extern EFI_GUID  gEdkiiNonDiscoverableAhciDeviceGuid;
 extern EFI_GUID  gEdkiiNonDiscoverableAmbaDeviceGuid;
 extern EFI_GUID  gEdkiiNonDiscoverableEhciDeviceGuid;
@@ -44,5 +53,6 @@ extern EFI_GUID  gEdkiiNonDiscoverableNvmeDeviceGuid;
 extern EFI_GUID  gEdkiiNonDiscoverableOhciDeviceGuid;
 extern EFI_GUID  gEdkiiNonDiscoverableSdhciDeviceGuid;
 extern EFI_GUID  gEdkiiNonDiscoverableUfsDeviceGuid;
+extern EFI_GUID  gEdkiiNonDiscoverableUfsMmioDeviceGuid;
 extern EFI_GUID  gEdkiiNonDiscoverableUhciDeviceGuid;
 extern EFI_GUID  gEdkiiNonDiscoverableXhciDeviceGuid;
