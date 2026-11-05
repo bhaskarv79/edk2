@@ -15,7 +15,13 @@
 #define EDKII_SD_MMC_OVERRIDE_PROTOCOL_GUID \
   { 0xeaf9e3c1, 0xc9cd, 0x46db, { 0xa5, 0xe5, 0x5a, 0x12, 0x4c, 0x83, 0x23, 0x23 } }
 
-#define EDKII_SD_MMC_OVERRIDE_PROTOCOL_VERSION  0x3
+//
+// Version 4 adds optional phases (EdkiiSdMmcSwResetSelect). A platform may
+// report version 4 without handling them: for an unknown phase it may return
+// EFI_UNSUPPORTED or EFI_INVALID_PARAMETER, or EFI_SUCCESS with PhaseData
+// unchanged, and the host controller driver keeps its default behaviour.
+//
+#define EDKII_SD_MMC_OVERRIDE_PROTOCOL_VERSION  0x4
 
 typedef struct _EDKII_SD_MMC_OVERRIDE EDKII_SD_MMC_OVERRIDE;
 
@@ -89,8 +95,29 @@ typedef enum {
   EdkiiSdMmcInitHostPost,
   EdkiiSdMmcUhsSignaling,
   EdkiiSdMmcSwitchClockFreqPost,
-  EdkiiSdMmcGetOperatingParam
+  EdkiiSdMmcGetOperatingParam,
+  //
+  // Called after EdkiiSdMmcResetPre and before the host controller driver
+  // writes the SDHCI Software Reset register. Added in protocol version 4,
+  // and only invoked if the platform's override protocol reports version 4
+  // or later.
+  //
+  // PhaseData points to a UINT8 holding the Software Reset register value
+  // the driver is about to write, SD_MMC_SW_RESET_ALL by default. The
+  // platform may replace it with SD_MMC_SW_RESET_CMD_LINE and/or
+  // SD_MMC_SW_RESET_DAT_LINE, for example when firmware does not allow a
+  // full reset of that controller. Any other value, or a return status of
+  // EFI_UNSUPPORTED or EFI_INVALID_PARAMETER, keeps SD_MMC_SW_RESET_ALL.
+  //
+  EdkiiSdMmcSwResetSelect
 } EDKII_SD_MMC_PHASE_TYPE;
+
+//
+// Software Reset register (SDHCI 2.2.17) values for EdkiiSdMmcSwResetSelect.
+//
+#define SD_MMC_SW_RESET_ALL       BIT0
+#define SD_MMC_SW_RESET_CMD_LINE  BIT1
+#define SD_MMC_SW_RESET_DAT_LINE  BIT2
 
 /**
   Override function for SDHCI capability bits

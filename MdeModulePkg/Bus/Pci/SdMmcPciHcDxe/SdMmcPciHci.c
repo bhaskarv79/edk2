@@ -509,12 +509,48 @@ SdMmcHcReset (
     }
   }
 
-  PciIo   = Private->PciIo;
-  SwReset = BIT0;
-  Status  = SdMmcHcOrMmio (PciIo, Slot, SD_MMC_HC_SW_RST, sizeof (SwReset), &SwReset);
+  //
+  // Let a version 4 platform narrow the reset to the CMD and/or DAT lines,
+  // for example when firmware does not allow a full reset of this
+  // controller.
+  //
+  SwReset = SD_MMC_SW_RESET_ALL;
+  if ((mOverride != NULL) && (mOverride->Version >= 4) && (mOverride->NotifyPhase != NULL)) {
+    Status = mOverride->NotifyPhase (
+                          Private->ControllerHandle,
+                          Slot,
+                          EdkiiSdMmcSwResetSelect,
+                          &SwReset
+                          );
+    if ((Status == EFI_UNSUPPORTED) || (Status == EFI_INVALID_PARAMETER)) {
+      //
+      // The platform does not know this phase, so it has no preference.
+      //
+      SwReset = SD_MMC_SW_RESET_ALL;
+    } else if (EFI_ERROR (Status)) {
+      DEBUG ((
+        DEBUG_WARN,
+        "%a: SD/MMC reset select notifier callback failed - %r\n",
+        __func__,
+        Status
+        ));
+      return Status;
+    }
+
+    if ((SwReset != SD_MMC_SW_RESET_ALL) &&
+        ((SwReset == 0) ||
+         ((SwReset & ~(UINT8)(SD_MMC_SW_RESET_CMD_LINE | SD_MMC_SW_RESET_DAT_LINE)) != 0)))
+    {
+      DEBUG ((DEBUG_WARN, "%a: invalid reset select 0x%x, resetting all\n", __func__, SwReset));
+      SwReset = SD_MMC_SW_RESET_ALL;
+    }
+  }
+
+  PciIo  = Private->PciIo;
+  Status = SdMmcHcOrMmio (PciIo, Slot, SD_MMC_HC_SW_RST, sizeof (SwReset), &SwReset);
 
   if (EFI_ERROR (Status)) {
-    DEBUG ((DEBUG_ERROR, "SdMmcHcReset: write SW Reset for All fails: %r\n", Status));
+    DEBUG ((DEBUG_ERROR, "SdMmcHcReset: write SW Reset 0x%x fails: %r\n", SwReset, Status));
     return Status;
   }
 
@@ -523,7 +559,7 @@ SdMmcHcReset (
              Slot,
              SD_MMC_HC_SW_RST,
              sizeof (SwReset),
-             BIT0,
+             SwReset,
              0x00,
              SD_MMC_HC_GENERIC_TIMEOUT
              );
