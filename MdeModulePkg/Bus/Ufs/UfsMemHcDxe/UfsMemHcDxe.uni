@@ -1,0 +1,14 @@
+// /** @file
+// UFS Memory-Mapped Host Controller Driver.
+//
+// Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.<BR>
+//
+// SPDX-License-Identifier: BSD-2-Clause-Patent
+//
+// **/
+
+
+#string STR_MODULE_ABSTRACT             #language en-US "Produces the UFS Host Controller Protocol for memory-mapped UFS host controllers."
+
+#string STR_MODULE_DESCRIPTION          #language en-US "Binds to non-discoverable UFS MMIO devices and produces EDKII_UFS_HOST_CONTROLLER_PROTOCOL for them, without PCI I/O emulation."
+
