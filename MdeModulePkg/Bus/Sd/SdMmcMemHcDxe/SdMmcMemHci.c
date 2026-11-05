@@ -1361,6 +1361,12 @@ SdMmcHcUhsSignaling (
       HostCtrl2 = SD_MMC_HC_CTRL_MMC_HS200;
       break;
     case SdMmcMmcHs400:
+    case SdMmcMmcHs400Es:
+      //
+      // SDHCI defines no Enhanced Strobe setting, so HS400 ES uses the HS400
+      // UHS mode and the platform enables the strobe in its
+      // EdkiiSdMmcUhsSignaling callback below.
+      //
       HostCtrl2 = SD_MMC_HC_CTRL_MMC_HS400;
       break;
     default:

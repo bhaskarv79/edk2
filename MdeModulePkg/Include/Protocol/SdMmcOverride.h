@@ -16,7 +16,8 @@
   { 0xeaf9e3c1, 0xc9cd, 0x46db, { 0xa5, 0xe5, 0x5a, 0x12, 0x4c, 0x83, 0x23, 0x23 } }
 
 //
-// Version 4 adds optional phases (EdkiiSdMmcSwResetSelect). A platform may
+// Version 4 adds optional phases (EdkiiSdMmcSwResetSelect,
+// EdkiiSdMmcGetHs400EsSupport) and the SdMmcMmcHs400Es bus mode. A platform may
 // report version 4 without handling them: for an unknown phase it may return
 // EFI_UNSUPPORTED or EFI_INVALID_PARAMETER, or EFI_SUCCESS with PhaseData
 // unchanged, and the host controller driver keeps its default behaviour.
@@ -86,6 +87,15 @@ typedef enum {
   SdMmcMmcHsDdr,
   SdMmcMmcHs200,
   SdMmcMmcHs400,
+  //
+  // eMMC HS400 with Enhanced Strobe (JESD84-B51). Added in protocol
+  // version 4. How a host controller enables the strobe is not defined by
+  // the SDHCI specification, so a host controller driver only selects this
+  // mode when the platform opts in through EdkiiSdMmcGetHs400EsSupport, and
+  // the platform enables the strobe in its EdkiiSdMmcUhsSignaling and
+  // EdkiiSdMmcSwitchClockFreqPost callbacks.
+  //
+  SdMmcMmcHs400Es,
 } SD_MMC_BUS_MODE;
 
 typedef enum {
@@ -109,7 +119,19 @@ typedef enum {
   // full reset of that controller. Any other value, or a return status of
   // EFI_UNSUPPORTED or EFI_INVALID_PARAMETER, keeps SD_MMC_SW_RESET_ALL.
   //
-  EdkiiSdMmcSwResetSelect
+  EdkiiSdMmcSwResetSelect,
+  //
+  // Asks whether the platform supports eMMC HS400 Enhanced Strobe
+  // (SdMmcMmcHs400Es). Added in protocol version 4, and only invoked if the
+  // platform's override protocol reports version 4 or later.
+  //
+  // PhaseData points to a BOOLEAN the driver has set to FALSE. A platform
+  // whose EdkiiSdMmcUhsSignaling and EdkiiSdMmcSwitchClockFreqPost callbacks
+  // handle SdMmcMmcHs400Es sets it to TRUE. A platform that does not know
+  // this phase leaves it FALSE whatever status it returns, so the driver
+  // never selects HS400 ES without an explicit opt-in.
+  //
+  EdkiiSdMmcGetHs400EsSupport
 } EDKII_SD_MMC_PHASE_TYPE;
 
 //

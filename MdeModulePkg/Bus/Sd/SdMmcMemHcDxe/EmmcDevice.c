@@ -9,6 +9,18 @@
 
 #include "SdMmcMemHcDxe.h"
 
+//
+// EXT_CSD STROBE_SUPPORT [184] (JESD84-B51). EMMC_EXT_CSD predates eMMC 5.1
+// and still names this byte Reserved10.
+//
+#define EMMC_EXT_CSD_STROBE_SUPPORT_OFFSET  184
+
+//
+// EXT_CSD BUS_WIDTH [183] Enhanced Strobe bit, set together with an 8-bit
+// DDR bus width to select HS400 Enhanced Strobe.
+//
+#define EMMC_BUS_WIDTH_ENHANCED_STROBE  BIT7
+
 /**
   Send command GO_IDLE_STATE (CMD0 with argument of 0x00000000) to the device to
   make it go to Idle State.
@@ -712,6 +724,7 @@ EmmcSwitchBusTiming (
   CmdSet = 0;
   switch (BusTiming) {
     case SdMmcMmcHs400:
+    case SdMmcMmcHs400Es:
       Value = (UINT8)((DriverStrength.Emmc << 4) | 3);
       break;
     case SdMmcMmcHs200:
@@ -953,6 +966,119 @@ EmmcSwitchToHS400 (
 }
 
 /**
+  Switch to the HS400 Enhanced Strobe timing. This function assumes that eMMC
+  bus is still in legacy mode.
+
+  Unlike HS400, Enhanced Strobe needs no HS200 tuning: the device drives a
+  strobe the host samples data and responses with. The sequence is the one in
+  EMMC Electrical Standard Spec 5.1 Section 6.6.2.3: switch to High Speed at
+  52 MHz or less, select an 8-bit DDR bus with Enhanced Strobe, then switch to
+  HS400.
+
+  @param[in] HcIo            The host controller I/O context.
+  @param[in] PassThru        A pointer to the EFI_SD_MMC_PASS_THRU_PROTOCOL instance.
+  @param[in] Slot            The slot number of the SD card to send the command to.
+  @param[in] Rca             The relative device address to be assigned.
+  @param[in] BusMode         Pointer to SD_MMC_BUS_SETTINGS structure containing bus settings.
+
+  @retval EFI_SUCCESS       The operation is done correctly.
+  @retval Others            The operation fails.
+
+**/
+EFI_STATUS
+EmmcSwitchToHS400Es (
+  IN SD_MMC_HC_IO                   *HcIo,
+  IN EFI_SD_MMC_PASS_THRU_PROTOCOL  *PassThru,
+  IN UINT8                          Slot,
+  IN UINT16                         Rca,
+  IN SD_MMC_BUS_SETTINGS            *BusMode
+  )
+{
+  EFI_STATUS  Status;
+  UINT32      HsFreq;
+
+  if ((BusMode->BusTiming != SdMmcMmcHs400Es) ||
+      (BusMode->BusWidth != 8))
+  {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  HsFreq = BusMode->ClockFreq < 52 ? BusMode->ClockFreq : 52;
+  Status = EmmcSwitchBusTiming (HcIo, PassThru, Slot, Rca, BusMode->DriverStrength, SdMmcMmcHsSdr, HsFreq);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  //
+  // 8-bit DDR bus width (6) with the Enhanced Strobe bit.
+  //
+  Status = EmmcSwitch (
+             PassThru,
+             Slot,
+             0x03,
+             OFFSET_OF (EMMC_EXT_CSD, BusWidth),
+             (UINT8)(6 | EMMC_BUS_WIDTH_ENHANCED_STROBE),
+             0
+             );
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_ERROR, "EmmcSwitchToHS400Es: Switch to 8-bit DDR with Enhanced Strobe fails with %r\n", Status));
+    return Status;
+  }
+
+  Status = EmmcCheckSwitchStatus (PassThru, Slot, Rca);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  Status = SdMmcHcSetBusWidth (HcIo, Slot, BusMode->BusWidth);
+  if (EFI_ERROR (Status)) {
+    return Status;
+  }
+
+  return EmmcSwitchBusTiming (HcIo, PassThru, Slot, Rca, BusMode->DriverStrength, BusMode->BusTiming, BusMode->ClockFreq);
+}
+
+/**
+  Check whether the platform supports HS400 Enhanced Strobe.
+
+  How a host controller enables the strobe is not defined by SDHCI, so the
+  platform's override protocol has to opt in explicitly.
+
+  @param[in] Private    Pointer to controller private data
+  @param[in] SlotIndex  Index of the slot in the controller
+
+  @retval TRUE   The platform handles SdMmcMmcHs400Es.
+  @retval FALSE  There is no override protocol, or it does not opt in.
+**/
+STATIC
+BOOLEAN
+EmmcIsHs400EsSupported (
+  IN SD_MMC_HC_PRIVATE_DATA  *Private,
+  IN UINT8                   SlotIndex
+  )
+{
+  BOOLEAN  Supported;
+
+  if ((mOverride == NULL) || (mOverride->Version < 4) || (mOverride->NotifyPhase == NULL)) {
+    return FALSE;
+  }
+
+  //
+  // The status is ignored on purpose: a platform that does not know this
+  // phase may return an error, and then it has left Supported FALSE.
+  //
+  Supported = FALSE;
+  mOverride->NotifyPhase (
+               Private->ControllerHandle,
+               SlotIndex,
+               EdkiiSdMmcGetHs400EsSupport,
+               &Supported
+               );
+
+  return Supported;
+}
+
+/**
   Check if passed BusTiming is supported in both controller and card.
 
   @param[in] Private    Pointer to controller private data
@@ -978,6 +1104,16 @@ EmmcIsBusTimingSupported (
 
   Supported = FALSE;
   switch (BusTiming) {
+    case SdMmcMmcHs400Es:
+      if (EmmcIsHs400EsSupported (Private, SlotIndex) &&
+          ((ExtCsd->DeviceType & (BIT6 | BIT7)) != 0) &&
+          ((((UINT8 *)ExtCsd)[EMMC_EXT_CSD_STROBE_SUPPORT_OFFSET] & BIT0) != 0) &&
+          (Capabilities->Hs400 != 0) && (Capabilities->BusWidth8 != 0))
+      {
+        Supported = TRUE;
+      }
+
+      break;
     case SdMmcMmcHs400:
       if ((((ExtCsd->DeviceType & (BIT6 | BIT7))  != 0) && (Capabilities->Hs400 != 0)) && (Capabilities->BusWidth8 != 0)) {
         Supported = TRUE;
@@ -1039,7 +1175,7 @@ EmmcGetTargetBusTiming (
   // We start with highest bus timing that this driver currently supports and
   // return as soon as we find supported timing.
   //
-  BusTiming = SdMmcMmcHs400;
+  BusTiming = SdMmcMmcHs400Es;
   while (BusTiming > SdMmcMmcLegacy) {
     if (EmmcIsBusTimingSupported (Private, SlotIndex, ExtCsd, BusTiming)) {
       break;
@@ -1072,7 +1208,7 @@ EmmcIsBusWidthSupported (
 {
   if ((BusWidth == 8) && (Private->Capability[SlotIndex].BusWidth8 != 0)) {
     return TRUE;
-  } else if ((BusWidth == 4) && (BusTiming != SdMmcMmcHs400)) {
+  } else if ((BusWidth == 4) && (BusTiming != SdMmcMmcHs400) && (BusTiming != SdMmcMmcHs400Es)) {
     return TRUE;
   } else if ((BusWidth == 1) && ((BusTiming == SdMmcMmcHsSdr) || (BusTiming == SdMmcMmcLegacy))) {
     return TRUE;
@@ -1143,6 +1279,7 @@ EmmcGetTargetClockFreq (
   PreferredClockFreq = Private->Slot[SlotIndex].OperatingParameters.ClockFreq;
 
   switch (BusTiming) {
+    case SdMmcMmcHs400Es:
     case SdMmcMmcHs400:
     case SdMmcMmcHs200:
       MaxClockFreq = 200;
@@ -1283,7 +1420,9 @@ EmmcSetBusMode (
     BusMode.DriverStrength.Emmc
     ));
 
-  if (BusMode.BusTiming == SdMmcMmcHs400) {
+  if (BusMode.BusTiming == SdMmcMmcHs400Es) {
+    Status = EmmcSwitchToHS400Es (HcIo, PassThru, Slot, Rca, &BusMode);
+  } else if (BusMode.BusTiming == SdMmcMmcHs400) {
     Status = EmmcSwitchToHS400 (HcIo, PassThru, Slot, Rca, &BusMode);
   } else if (BusMode.BusTiming == SdMmcMmcHs200) {
     Status = EmmcSwitchToHS200 (HcIo, PassThru, Slot, Rca, &BusMode);
@@ -1297,7 +1436,14 @@ EmmcSetBusMode (
     Status = EmmcSwitchToHighSpeed (HcIo, PassThru, Slot, Rca, &BusMode);
   }
 
-  DEBUG ((DEBUG_INFO, "EmmcSetBusMode: Switch to %a %r\n", (BusMode.BusTiming == SdMmcMmcHs400) ? "HS400" : ((BusMode.BusTiming == SdMmcMmcHs200) ? "HS200" : "HighSpeed"), Status));
+  DEBUG ((
+    DEBUG_INFO,
+    "EmmcSetBusMode: Switch to %a %r\n",
+    (BusMode.BusTiming == SdMmcMmcHs400Es) ? "HS400 ES" :
+    ((BusMode.BusTiming == SdMmcMmcHs400) ? "HS400" :
+     ((BusMode.BusTiming == SdMmcMmcHs200) ? "HS200" : "HighSpeed")),
+    Status
+    ));
 
   return Status;
 }
