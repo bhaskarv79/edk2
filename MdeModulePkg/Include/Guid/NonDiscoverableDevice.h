@@ -37,12 +37,22 @@
 #define EDKII_NON_DISCOVERABLE_XHCI_DEVICE_GUID \
   { 0xB1BE0BC5, 0x6C28, 0x442D, {0xAA, 0x37, 0x15, 0x1B, 0x42, 0x57, 0xBD, 0x78 } }
 
+//
+// An SDHCI-compliant SD/MMC host controller that is driven natively through
+// its MMIO register window (SdMmcMemHcDxe), rather than through the PCI I/O
+// emulation that NonDiscoverablePciDeviceDxe provides for
+// EDKII_NON_DISCOVERABLE_SDHCI_DEVICE_GUID.
+//
+#define EDKII_NON_DISCOVERABLE_SDHCI_MMIO_DEVICE_GUID \
+  { 0x3A032C7B, 0x62B2, 0x4933, {0xA0, 0x60, 0xCD, 0x0A, 0x39, 0x3C, 0x33, 0xD7 } }
+
 extern EFI_GUID  gEdkiiNonDiscoverableAhciDeviceGuid;
 extern EFI_GUID  gEdkiiNonDiscoverableAmbaDeviceGuid;
 extern EFI_GUID  gEdkiiNonDiscoverableEhciDeviceGuid;
 extern EFI_GUID  gEdkiiNonDiscoverableNvmeDeviceGuid;
 extern EFI_GUID  gEdkiiNonDiscoverableOhciDeviceGuid;
 extern EFI_GUID  gEdkiiNonDiscoverableSdhciDeviceGuid;
+extern EFI_GUID  gEdkiiNonDiscoverableSdhciMmioDeviceGuid;
 extern EFI_GUID  gEdkiiNonDiscoverableUfsDeviceGuid;
 extern EFI_GUID  gEdkiiNonDiscoverableUhciDeviceGuid;
 extern EFI_GUID  gEdkiiNonDiscoverableXhciDeviceGuid;

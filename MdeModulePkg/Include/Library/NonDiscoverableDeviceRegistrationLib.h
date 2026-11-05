@@ -19,6 +19,7 @@ typedef enum {
   NonDiscoverableDeviceTypeUfs,
   NonDiscoverableDeviceTypeUhci,
   NonDiscoverableDeviceTypeXhci,
+  NonDiscoverableDeviceTypeSdhciMmio,
   NonDiscoverableDeviceTypeMax,
 } NON_DISCOVERABLE_DEVICE_TYPE;
 

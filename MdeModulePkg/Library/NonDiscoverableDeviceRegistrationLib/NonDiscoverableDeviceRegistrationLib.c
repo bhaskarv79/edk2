@@ -61,6 +61,9 @@ GetGuidFromType (
     case NonDiscoverableDeviceTypeXhci:
       return &gEdkiiNonDiscoverableXhciDeviceGuid;
 
+    case NonDiscoverableDeviceTypeSdhciMmio:
+      return &gEdkiiNonDiscoverableSdhciMmioDeviceGuid;
+
     default:
       return NULL;
   }
