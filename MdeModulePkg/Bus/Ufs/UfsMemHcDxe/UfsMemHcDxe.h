@@ -17,6 +17,7 @@
 
 #include <Protocol/ComponentName.h>
 #include <Protocol/ComponentName2.h>
+#include <Protocol/Cpu.h>
 #include <Protocol/DriverBinding.h>
 #include <Protocol/NonDiscoverableDevice.h>
 #include <Protocol/PciIo.h>
@@ -24,7 +25,9 @@
 
 #include <Library/BaseLib.h>
 #include <Library/BaseMemoryLib.h>
+#include <Library/CacheMaintenanceLib.h>
 #include <Library/DebugLib.h>
+#include <Library/DxeServicesTableLib.h>
 #include <Library/IoLib.h>
 #include <Library/MemoryAllocationLib.h>
 #include <Library/UefiBootServicesTableLib.h>
@@ -41,6 +44,24 @@ extern EFI_COMPONENT_NAME2_PROTOCOL  gUfsMemHcComponentName2;
 #define UFS_MEM_HC_MIN_MMIO_SIZE  0x100
 
 #define UFS_MEM_HC_PRIVATE_DATA_SIGNATURE  SIGNATURE_32 ('U', 'F', 'S', 'M')
+
+///
+/// Map token passed back through Mapping in UfsMemHcMap() and consumed by
+/// UfsMemHcUnmap().
+///
+/// When a transfer cannot be handed to the controller in place, Map()
+/// bounces it through BounceBuffer instead. That happens on a non-coherent
+/// platform if a device-to-host buffer does not fill whole CPU cache lines.
+/// Invalidating a partial line could otherwise discard dirty data belonging
+/// to unrelated memory sharing that line.
+///
+typedef struct {
+  VOID                                   *HostAddress;
+  UINTN                                  NumberOfBytes;
+  EDKII_UFS_HOST_CONTROLLER_OPERATION    Operation;
+  VOID                                   *BounceBuffer;
+  UINTN                                  BouncePages;
+} UFS_MEM_HC_MAP_INFO;
 
 ///
 /// Per-controller private context allocated in Start() and freed in Stop().
@@ -63,6 +84,16 @@ typedef struct {
   ///
   EFI_PHYSICAL_ADDRESS                  MmioBase;
   UINT64                                MmioSize;
+
+  ///
+  /// TRUE if DMA is cache coherent (Device->DmaType).
+  ///
+  BOOLEAN                               DmaCoherent;
+
+  ///
+  /// CPU data cache line size used for non-coherent DMA alignment.
+  ///
+  UINT32                                DmaAlignment;
 } UFS_MEM_HC_PRIVATE_DATA;
 
 #define UFS_MEM_HC_PRIVATE_DATA_FROM_UFSHC(a) \

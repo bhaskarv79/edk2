@@ -44,7 +44,9 @@
 [LibraryClasses]
   BaseLib
   BaseMemoryLib
+  CacheMaintenanceLib
   DebugLib
+  DxeServicesTableLib
   IoLib
   MemoryAllocationLib
   UefiBootServicesTableLib
@@ -57,6 +59,7 @@
 [Protocols]
   gEdkiiNonDiscoverableDeviceProtocolGuid   ## TO_START
   gEdkiiUfsHostControllerProtocolGuid       ## BY_START
+  gEfiCpuArchProtocolGuid                   ## SOMETIMES_CONSUMES
 
 [UserExtensions.TianoCore."ExtraFiles"]
   UfsMemHcDxeExtra.uni
