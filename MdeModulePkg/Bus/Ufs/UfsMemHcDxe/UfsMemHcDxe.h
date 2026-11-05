@@ -39,6 +39,13 @@ extern EFI_COMPONENT_NAME_PROTOCOL   gUfsMemHcComponentName;
 extern EFI_COMPONENT_NAME2_PROTOCOL  gUfsMemHcComponentName2;
 
 //
+// UFSHCI Host Controller Capabilities register (UFSHCI spec, CAP) and its
+// 64-bit Addressing Supported (64AS) bit.
+//
+#define UFS_MEM_HC_CAP_OFFSET  0x00
+#define UFS_MEM_HC_CAP_64ADDR  BIT24
+
+//
 // Size of the UFSHCI register map the generic UFS stack accesses.
 //
 #define UFS_MEM_HC_MIN_MMIO_SIZE  0x100
@@ -50,10 +57,11 @@ extern EFI_COMPONENT_NAME2_PROTOCOL  gUfsMemHcComponentName2;
 /// UfsMemHcUnmap().
 ///
 /// When a transfer cannot be handed to the controller in place, Map()
-/// bounces it through BounceBuffer instead. That happens on a non-coherent
-/// platform if a device-to-host buffer does not fill whole CPU cache lines.
-/// Invalidating a partial line could otherwise discard dirty data belonging
-/// to unrelated memory sharing that line.
+/// bounces it through BounceBuffer instead. That happens if the buffer is
+/// above 4 GB on a controller without 64-bit addressing, or, on a
+/// non-coherent platform, if a device-to-host buffer does not fill whole
+/// CPU cache lines. Invalidating a partial line could otherwise discard
+/// dirty data belonging to unrelated memory sharing that line.
 ///
 typedef struct {
   VOID                                   *HostAddress;
@@ -89,6 +97,11 @@ typedef struct {
   /// TRUE if DMA is cache coherent (Device->DmaType).
   ///
   BOOLEAN                               DmaCoherent;
+
+  ///
+  /// TRUE if the controller reports 64-bit addressing (CAP.64AS).
+  ///
+  BOOLEAN                               Dma64;
 
   ///
   /// CPU data cache line size used for non-coherent DMA alignment.

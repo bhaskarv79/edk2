@@ -241,6 +241,7 @@ UfsMemHcDriverBindingStart (
   EFI_STATUS               Status;
   NON_DISCOVERABLE_DEVICE  *Device;
   UFS_MEM_HC_PRIVATE_DATA  *Private;
+  UINT32                   Capabilities;
 
   Status = gBS->OpenProtocol (
                   Controller,
@@ -283,6 +284,13 @@ UfsMemHcDriverBindingStart (
     }
   }
 
+  //
+  // A controller without 64-bit addressing can only reach the low 4 GB, so
+  // AllocateBuffer() and Map() must keep its DMA buffers below that.
+  //
+  Capabilities   = MmioRead32 ((UINTN)Private->MmioBase + UFS_MEM_HC_CAP_OFFSET);
+  Private->Dma64 = (BOOLEAN)((Capabilities & UFS_MEM_HC_CAP_64ADDR) != 0);
+
   Status = gBS->InstallProtocolInterface (
                   &Controller,
                   &gEdkiiUfsHostControllerProtocolGuid,
@@ -296,11 +304,12 @@ UfsMemHcDriverBindingStart (
 
   DEBUG ((
     DEBUG_INFO,
-    "%a: base 0x%Lx size 0x%Lx %a DMA\n",
+    "%a: base 0x%Lx size 0x%Lx %a DMA, %a addressing\n",
     __func__,
     (UINT64)Private->MmioBase,
     Private->MmioSize,
-    Private->DmaCoherent ? "coherent" : "non-coherent"
+    Private->DmaCoherent ? "coherent" : "non-coherent",
+    Private->Dma64 ? "64-bit" : "32-bit"
     ));
 
   return EFI_SUCCESS;

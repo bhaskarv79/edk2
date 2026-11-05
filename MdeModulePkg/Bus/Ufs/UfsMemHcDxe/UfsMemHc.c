@@ -4,7 +4,8 @@
   Provides MMIO register access and DMA buffer management for a memory-mapped
   UFS host controller. The non-discoverable device's DmaType selects between
   coherent DMA and non-coherent DMA, where common buffers are mapped uncached
-  and streaming buffers get CPU cache maintenance.
+  and streaming buffers get CPU cache maintenance. Controllers without 64-bit
+  addressing have their DMA buffers kept below 4 GB.
 
   Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.<BR>
 
@@ -13,6 +14,36 @@
 **/
 
 #include "UfsMemHcDxe.h"
+
+/**
+  Allocate pages the controller can reach by DMA.
+
+  @param[in]   Private     The controller private data.
+  @param[in]   MemoryType  The type of memory to allocate.
+  @param[in]   Pages       The number of pages to allocate.
+  @param[out]  Address     The base address of the allocated pages.
+
+  @retval EFI_SUCCESS  The pages were allocated.
+  @retval other        AllocatePages() failed.
+
+**/
+STATIC
+EFI_STATUS
+UfsMemHcAllocateDmaPages (
+  IN  UFS_MEM_HC_PRIVATE_DATA  *Private,
+  IN  EFI_MEMORY_TYPE          MemoryType,
+  IN  UINTN                    Pages,
+  OUT EFI_PHYSICAL_ADDRESS     *Address
+  )
+{
+  if (Private->Dma64) {
+    *Address = MAX_UINT64;
+    return gBS->AllocatePages (AllocateAnyPages, MemoryType, Pages, Address);
+  }
+
+  *Address = BASE_4GB - 1;
+  return gBS->AllocatePages (AllocateMaxAddress, MemoryType, Pages, Address);
+}
 
 /**
   Get the MMIO base of the UFS host controller.
@@ -51,6 +82,8 @@ UfsMemHcGetMmioBar (
   @param[in]  Operation      Indicates if the bus master is going to read or write to system memory.
   @param[in]  Address        The system memory address to map to the UFS controller.
   @param[in]  NumberOfBytes  The number of bytes to map.
+  @param[in]  Above4GB       TRUE if Address..Address+NumberOfBytes is not entirely
+                             below 4 GB on a controller without 64-bit addressing.
 
   @retval TRUE   The buffer must be bounced.
   @retval FALSE  The buffer can be used in place.
@@ -62,11 +95,16 @@ UfsMemHcNeedBounce (
   IN  UFS_MEM_HC_PRIVATE_DATA              *Private,
   IN  EDKII_UFS_HOST_CONTROLLER_OPERATION  Operation,
   IN  EFI_PHYSICAL_ADDRESS                 Address,
-  IN  UINTN                                NumberOfBytes
+  IN  UINTN                                NumberOfBytes,
+  IN  BOOLEAN                              Above4GB
   )
 {
   if (NumberOfBytes == 0) {
     return FALSE;
+  }
+
+  if (Above4GB) {
+    return TRUE;
   }
 
   //
@@ -117,12 +155,12 @@ UfsMemHcBounceBuffer (
   EFI_PHYSICAL_ADDRESS  BounceAddress;
 
   MapInfo->BouncePages = EFI_SIZE_TO_PAGES (NumberOfBytes);
-  Status               = gBS->AllocatePages (
-                                AllocateAnyPages,
-                                EfiBootServicesData,
-                                MapInfo->BouncePages,
-                                &BounceAddress
-                                );
+  Status               = UfsMemHcAllocateDmaPages (
+                           Private,
+                           EfiBootServicesData,
+                           MapInfo->BouncePages,
+                           &BounceAddress
+                           );
   if (EFI_ERROR (Status)) {
     return EFI_OUT_OF_RESOURCES;
   }
@@ -185,10 +223,10 @@ UfsMemHcFlushForDevice (
 
   Common buffers must come from AllocateBuffer() and are mapped in place.
 
-  Bus master read and write buffers are mapped in place unless, on a
-  non-coherent platform, cache maintenance on them could touch unrelated
-  data. Then they are bounced through a page-aligned buffer. On a
-  non-coherent platform,
+  Bus master read and write buffers are mapped in place when the controller
+  can reach them and, on a non-coherent platform, when cache maintenance on
+  them cannot touch unrelated data. Otherwise they are bounced through a
+  page-aligned buffer the controller can reach. On a non-coherent platform,
   a bus master read buffer is written back from the CPU cache, and a bus
   master write buffer is written back and invalidated.
 
@@ -202,6 +240,7 @@ UfsMemHcFlushForDevice (
   @param[out]     Mapping        A resulting value to pass to Unmap().
 
   @retval EFI_SUCCESS            The range was mapped for the returned NumberOfBytes.
+  @retval EFI_UNSUPPORTED        The HostAddress cannot be mapped as a common buffer.
   @retval EFI_INVALID_PARAMETER  One or more parameters are invalid.
   @retval EFI_OUT_OF_RESOURCES   The request could not be completed due to a lack of resources.
 
@@ -221,6 +260,8 @@ UfsMemHcMap (
   UFS_MEM_HC_PRIVATE_DATA          *Private;
   UFS_MEM_HC_MAP_INFO              *MapInfo;
   EFI_PHYSICAL_ADDRESS             Address;
+  EFI_PHYSICAL_ADDRESS             End;
+  BOOLEAN                          Above4GB;
   VOID                             *DmaBuffer;
   EFI_GCD_MEMORY_SPACE_DESCRIPTOR  GcdDescriptor;
 
@@ -234,12 +275,25 @@ UfsMemHcMap (
   Private = UFS_MEM_HC_PRIVATE_DATA_FROM_UFSHC (This);
   Address = (EFI_PHYSICAL_ADDRESS)(UINTN)HostAddress;
 
+  //
+  // Without 64-bit addressing the whole buffer must lie below 4 GB.
+  //
+  Above4GB = FALSE;
+  if (!Private->Dma64) {
+    End      = Address + *NumberOfBytes;
+    Above4GB = (BOOLEAN)((End < Address) || (End > SIZE_4GB));
+  }
+
   if (Operation == EdkiiUfsHcOperationBusMasterCommonBuffer) {
     //
     // A common buffer is shared with the controller for its whole lifetime,
-    // so it cannot be bounced. If DMA is non-coherent, AllocateBuffer() has
-    // mapped it uncached.
+    // so it cannot be bounced. AllocateBuffer() places it where the
+    // controller can reach it and, if DMA is non-coherent, maps it uncached.
     //
+    if (Above4GB) {
+      return EFI_UNSUPPORTED;
+    }
+
     DEBUG_CODE_BEGIN ();
     if (!Private->DmaCoherent) {
       Status = gDS->GetMemorySpaceDescriptor (Address, &GcdDescriptor);
@@ -267,7 +321,7 @@ UfsMemHcMap (
   MapInfo->Operation     = Operation;
 
   DmaBuffer = HostAddress;
-  if (UfsMemHcNeedBounce (Private, Operation, Address, *NumberOfBytes)) {
+  if (UfsMemHcNeedBounce (Private, Operation, Address, *NumberOfBytes, Above4GB)) {
     Status = UfsMemHcBounceBuffer (Private, Operation, HostAddress, *NumberOfBytes, MapInfo, &DmaBuffer);
     if (EFI_ERROR (Status)) {
       FreePool (MapInfo);
@@ -351,8 +405,9 @@ UfsMemHcUnmap (
   Allocates pages that are suitable for an EdkiiUfsHcOperationBusMasterCommonBuffer
   mapping.
 
-  If DMA is non-coherent the pages are remapped uncached, which is what
-  lets Map() share them with the controller without cache maintenance.
+  The pages are placed where the controller can reach them. If DMA is
+  non-coherent they are also remapped uncached, which is what lets Map()
+  share them with the controller without cache maintenance.
 
   As with the PCI root bridge, the MEMORY_WRITE_COMBINE and MEMORY_CACHED
   attributes are accepted as hints and otherwise ignored.
@@ -408,7 +463,7 @@ UfsMemHcAllocateBuffer (
 
   Private = UFS_MEM_HC_PRIVATE_DATA_FROM_UFSHC (This);
 
-  Status = gBS->AllocatePages (AllocateAnyPages, MemoryType, Pages, &Address);
+  Status = UfsMemHcAllocateDmaPages (Private, MemoryType, Pages, &Address);
   if (EFI_ERROR (Status)) {
     DEBUG ((
       DEBUG_ERROR,
