@@ -146,6 +146,15 @@ READ_LOCK_STATUS   = TRUE
   INF MdeModulePkg/Bus/Scsi/ScsiBusDxe/ScsiBusDxe.inf
   INF MdeModulePkg/Bus/Scsi/ScsiDiskDxe/ScsiDiskDxe.inf
 
+!if $(UFS_BOOT_ENABLE) == TRUE
+  #
+  # UFS host controllers from the device tree
+  #
+  INF ArmVirtPkg/UfsMmioDxe/UfsMmioDxe.inf
+  INF MdeModulePkg/Bus/Ufs/UfsMemHcDxe/UfsMemHcDxe.inf
+  INF MdeModulePkg/Bus/Ufs/UfsPassThruDxe/UfsPassThruDxe.inf
+!endif
+
   #
   # NVME Driver
   #

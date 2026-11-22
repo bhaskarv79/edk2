@@ -31,6 +31,14 @@
   DEFINE TTY_TERMINAL            = FALSE
   DEFINE SECURE_BOOT_ENABLE      = FALSE
   DEFINE QEMU_PV_VARS            = FALSE
+
+  #
+  # UFS host controllers from the device tree (UfsMmioDxe, UfsMemHcDxe,
+  # UfsPassThruDxe). UFS_DMA_NONCOHERENT registers them with non-coherent
+  # DMA.
+  #
+  DEFINE UFS_BOOT_ENABLE         = FALSE
+  DEFINE UFS_DMA_NONCOHERENT     = FALSE
   DEFINE MP_SERVICES_ENABLE      = FALSE
 
   #
@@ -115,6 +123,10 @@
   gEfiMdeModulePkgTokenSpaceGuid.PcdConOutGopSupport|TRUE
 
   gEfiMdeModulePkgTokenSpaceGuid.PcdTurnOffUsbLegacySupport|TRUE
+
+!if $(UFS_DMA_NONCOHERENT) == TRUE
+  gArmVirtTokenSpaceGuid.PcdUfsMmioDmaNonCoherent|TRUE
+!endif
 
 !if $(QEMU_PV_VARS) == TRUE
   gUefiOvmfPkgTokenSpaceGuid.PcdQemuVarsRequire|TRUE
@@ -315,6 +327,18 @@
   # ACPI Support
   #
   OvmfPkg/PlatformHasAcpiDtDxe/PlatformHasAcpiDtDxe.inf
+!if $(UFS_BOOT_ENABLE) == TRUE
+  #
+  # UFS host controllers from the device tree
+  #
+  ArmVirtPkg/UfsMmioDxe/UfsMmioDxe.inf {
+    <LibraryClasses>
+      NonDiscoverableDeviceRegistrationLib|MdeModulePkg/Library/NonDiscoverableDeviceRegistrationLib/NonDiscoverableDeviceRegistrationLib.inf
+  }
+  MdeModulePkg/Bus/Ufs/UfsMemHcDxe/UfsMemHcDxe.inf
+  MdeModulePkg/Bus/Ufs/UfsPassThruDxe/UfsPassThruDxe.inf
+!endif
+
 [Components.AARCH64]
   MdeModulePkg/Universal/Acpi/BootGraphicsResourceTableDxe/BootGraphicsResourceTableDxe.inf
   OvmfPkg/AcpiPlatformDxe/AcpiPlatformDxe.inf {

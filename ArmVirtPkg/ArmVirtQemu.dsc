@@ -31,6 +31,14 @@
   DEFINE TTY_TERMINAL            = FALSE
   DEFINE SECURE_BOOT_ENABLE      = FALSE
   DEFINE QEMU_PV_VARS            = FALSE
+
+  #
+  # UFS host controllers from the device tree (UfsMmioDxe, UfsMemHcDxe,
+  # UfsPassThruDxe). UFS_DMA_NONCOHERENT registers them with non-coherent
+  # DMA.
+  #
+  DEFINE UFS_BOOT_ENABLE         = FALSE
+  DEFINE UFS_DMA_NONCOHERENT     = FALSE
   DEFINE TPM2_ENABLE             = FALSE
   DEFINE TPM2_CONFIG_ENABLE      = FALSE
   DEFINE CAVIUM_ERRATUM_27456    = FALSE
