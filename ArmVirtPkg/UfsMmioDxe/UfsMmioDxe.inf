@@ -1,0 +1,45 @@
+## @file
+#  Register the UFS host controllers described in the device tree as
+#  non-discoverable UFS MMIO devices, for UfsMemHcDxe.
+#
+#  Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.<BR>
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+##
+
+[Defines]
+  INF_VERSION                    = 1.29
+  BASE_NAME                      = UfsMmioDxe
+  FILE_GUID                      = 55F9B886-B188-4DEE-B290-11358D3DF0A8
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = UfsMmioDxeEntryPoint
+
+[Sources]
+  UfsMmioDxe.c
+
+[Packages]
+  ArmVirtPkg/ArmVirtPkg.dec
+  EmbeddedPkg/EmbeddedPkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+  MdePkg/MdePkg.dec
+  OvmfPkg/OvmfPkg.dec
+
+[LibraryClasses]
+  BaseLib
+  DebugLib
+  MapMmioLib
+  NonDiscoverableDeviceRegistrationLib
+  PcdLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+
+[Protocols]
+  gFdtClientProtocolGuid                  ## CONSUMES
+
+[FeaturePcd]
+  gArmVirtTokenSpaceGuid.PcdUfsMmioDmaNonCoherent  ## CONSUMES
+
+[Depex]
+  gFdtClientProtocolGuid
