@@ -150,7 +150,18 @@ READ_LOCK_STATUS   = TRUE
   #
   # UFS host controllers from the device tree
   #
+!if $(UFS_PLATFORM) != QCOM
   INF ArmVirtPkg/UfsMmioDxe/UfsMmioDxe.inf
+!endif
+!if $(UFS_PLATFORM) == LAB
+  INF ArmVirtPkg/Lab/UfsHcPlatformLabDxe/UfsHcPlatformLabDxe.inf
+!endif
+!if $(UFS_PLATFORM) == QCOM
+  # QcomUfsHcDxe first: its registration must wait for the DTB extension
+  # protocol rather than rely on the dispatch order
+  INF Silicon/Qualcomm/Drivers/QcomUfsHcDxe/QcomUfsHcDxe.inf
+  INF Platform/Qualcomm/Lab/QemuDtbExtnDxe/QemuDtbExtnDxe.inf
+!endif
   INF MdeModulePkg/Bus/Ufs/UfsMemHcDxe/UfsMemHcDxe.inf
   INF MdeModulePkg/Bus/Ufs/UfsPassThruDxe/UfsPassThruDxe.inf
 !endif

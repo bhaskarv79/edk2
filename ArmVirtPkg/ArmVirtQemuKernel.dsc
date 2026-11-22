@@ -39,6 +39,15 @@
   #
   DEFINE UFS_BOOT_ENABLE         = FALSE
   DEFINE UFS_DMA_NONCOHERENT     = FALSE
+
+  #
+  # Lab: UFS_PLATFORM = NONE, LAB (UfsHcPlatformLabDxe) or QCOM (QcomUfsHcDxe
+  # from edk2-platforms with the lab DTB extension provider, which registers
+  # the controller itself instead of UfsMmioDxe). UFS_LAB_FAIL_PHASE makes
+  # UfsHcPlatformLabDxe fail that callback phase (0-3).
+  #
+  DEFINE UFS_PLATFORM            = NONE
+  DEFINE UFS_LAB_FAIL_PHASE      = 0xFF
   DEFINE MP_SERVICES_ENABLE      = FALSE
 
   #
@@ -126,6 +135,12 @@
 
 !if $(UFS_DMA_NONCOHERENT) == TRUE
   gArmVirtTokenSpaceGuid.PcdUfsMmioDmaNonCoherent|TRUE
+!endif
+
+[PcdsFixedAtBuild.common]
+  gArmVirtTokenSpaceGuid.PcdUfsLabFailPhase|$(UFS_LAB_FAIL_PHASE)
+!if $(UFS_PLATFORM) == QCOM
+  gQualcommCommonSiliconPkgTokenSpaceGuid.PcdUfsConfigSourceDeviceTree|1
 !endif
 
 !if $(QEMU_PV_VARS) == TRUE
@@ -331,10 +346,23 @@
   #
   # UFS host controllers from the device tree
   #
+!if $(UFS_PLATFORM) != QCOM
   ArmVirtPkg/UfsMmioDxe/UfsMmioDxe.inf {
     <LibraryClasses>
       NonDiscoverableDeviceRegistrationLib|MdeModulePkg/Library/NonDiscoverableDeviceRegistrationLib/NonDiscoverableDeviceRegistrationLib.inf
   }
+!endif
+!if $(UFS_PLATFORM) == LAB
+  ArmVirtPkg/Lab/UfsHcPlatformLabDxe/UfsHcPlatformLabDxe.inf
+!endif
+!if $(UFS_PLATFORM) == QCOM
+  Silicon/Qualcomm/Drivers/QcomUfsHcDxe/QcomUfsHcDxe.inf {
+    <LibraryClasses>
+      NonDiscoverableDeviceRegistrationLib|MdeModulePkg/Library/NonDiscoverableDeviceRegistrationLib/NonDiscoverableDeviceRegistrationLib.inf
+  }
+  Platform/Qualcomm/Lab/QemuDtbExtnDxe/QemuDtbExtnDxe.inf
+!endif
+  ArmVirtPkg/Lab/UfsBlkTest/UfsBlkTest.inf
   MdeModulePkg/Bus/Ufs/UfsMemHcDxe/UfsMemHcDxe.inf
   MdeModulePkg/Bus/Ufs/UfsPassThruDxe/UfsPassThruDxe.inf
 !endif
