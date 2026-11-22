@@ -39,6 +39,7 @@
   gEfiMemoryTypeInformationGuid
 
 [FeaturePcd]
+  gArmVirtTokenSpaceGuid.PcdDramUncachedCapable
   gEmbeddedTokenSpaceGuid.PcdPrePiProduceMemoryTypeInformationHob
 
 [FixedPcd]

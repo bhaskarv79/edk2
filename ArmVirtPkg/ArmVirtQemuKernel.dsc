@@ -135,12 +135,19 @@
 
 !if $(UFS_DMA_NONCOHERENT) == TRUE
   gArmVirtTokenSpaceGuid.PcdUfsMmioDmaNonCoherent|TRUE
+  gArmVirtTokenSpaceGuid.PcdDramUncachedCapable|TRUE
 !endif
 
 [PcdsFixedAtBuild.common]
   gArmVirtTokenSpaceGuid.PcdUfsLabFailPhase|$(UFS_LAB_FAIL_PHASE)
 !if $(UFS_PLATFORM) == QCOM
   gQualcommCommonSiliconPkgTokenSpaceGuid.PcdUfsConfigSourceDeviceTree|1
+!endif
+
+[PcdsFeatureFlag.common]
+!if $(UFS_PLATFORM) == QCOM
+  # QcomUfsHcDxe registers its controller with non-coherent DMA
+  gArmVirtTokenSpaceGuid.PcdDramUncachedCapable|TRUE
 !endif
 
 !if $(QEMU_PV_VARS) == TRUE

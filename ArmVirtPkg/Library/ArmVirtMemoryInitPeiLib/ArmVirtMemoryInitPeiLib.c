@@ -75,6 +75,16 @@ MemoryPeim (
                         EFI_RESOURCE_ATTRIBUTE_TESTED
                         );
 
+  //
+  // Lab: let DMA buffers of non-coherent devices be remapped uncached, as
+  // DRAM on silicon platforms allows (UFS MMIO non-coherent DMA tests).
+  //
+  if (FeaturePcdGet (PcdDramUncachedCapable)) {
+    ResourceAttributes |= EFI_RESOURCE_ATTRIBUTE_UNCACHEABLE |
+                          EFI_RESOURCE_ATTRIBUTE_WRITE_COMBINEABLE |
+                          EFI_RESOURCE_ATTRIBUTE_WRITE_THROUGH_CACHEABLE;
+  }
+
   SystemMemoryTop = PcdGet64 (PcdSystemMemoryBase) + SystemMemorySize;
 
   if (SystemMemoryTop - 1 > MAX_ALLOC_ADDRESS) {
