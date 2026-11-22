@@ -1,0 +1,43 @@
+## @file
+#  Lab UFS host controller platform driver (EDKII_UFS_HC_PLATFORM_PROTOCOL).
+#  Lab code, not intended for upstream.
+#
+#  Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.<BR>
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+##
+
+[Defines]
+  INF_VERSION                    = 1.29
+  BASE_NAME                      = UfsHcPlatformLabDxe
+  FILE_GUID                      = E991A825-DF79-4E5F-BBE2-F624447DC244
+  MODULE_TYPE                    = DXE_DRIVER
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = UfsHcPlatformLabDxeEntryPoint
+
+[Sources]
+  UfsHcPlatformLabDxe.c
+
+[Packages]
+  ArmVirtPkg/ArmVirtPkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+  MdePkg/MdePkg.dec
+  OvmfPkg/OvmfPkg.dec
+
+[LibraryClasses]
+  BaseLib
+  DebugLib
+  PcdLib
+  QemuFwCfgLib
+  UefiBootServicesTableLib
+  UefiDriverEntryPoint
+
+[Protocols]
+  gEdkiiUfsHcPlatformProtocolGuid        ## PRODUCES
+
+[Pcd]
+  gArmVirtTokenSpaceGuid.PcdUfsLabFailPhase  ## CONSUMES
+
+[Depex]
+  TRUE
