@@ -1,0 +1,35 @@
+## @file
+#  Lab UEFI Shell application: Block I/O data test on a UFS logical unit.
+#  Lab code, not intended for upstream.
+#
+#  Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.<BR>
+#
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+##
+
+[Defines]
+  INF_VERSION                    = 1.29
+  BASE_NAME                      = UfsBlkTest
+  FILE_GUID                      = 8E3AB5A4-0AEE-492E-8D5B-A86390C6788A
+  MODULE_TYPE                    = UEFI_APPLICATION
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = UfsBlkTestMain
+
+[Sources]
+  UfsBlkTest.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+
+[LibraryClasses]
+  BaseMemoryLib
+  DevicePathLib
+  MemoryAllocationLib
+  UefiApplicationEntryPoint
+  UefiBootServicesTableLib
+  UefiLib
+
+[Protocols]
+  gEfiBlockIoProtocolGuid                ## CONSUMES
+  gEfiDevicePathProtocolGuid             ## CONSUMES
