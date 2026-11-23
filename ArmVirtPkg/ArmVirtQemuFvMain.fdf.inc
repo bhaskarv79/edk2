@@ -160,7 +160,9 @@ READ_LOCK_STATUS   = TRUE
   # QcomUfsHcDxe first: its registration must wait for the DTB extension
   # protocol rather than rely on the dispatch order
   INF Silicon/Qualcomm/Drivers/QcomUfsHcDxe/QcomUfsHcDxe.inf
+!if $(UFS_QCOM_CONFIG) != PCD
   INF Platform/Qualcomm/Lab/QemuDtbExtnDxe/QemuDtbExtnDxe.inf
+!endif
 !endif
   INF MdeModulePkg/Bus/Ufs/UfsMemHcDxe/UfsMemHcDxe.inf
   INF MdeModulePkg/Bus/Ufs/UfsPassThruDxe/UfsPassThruDxe.inf

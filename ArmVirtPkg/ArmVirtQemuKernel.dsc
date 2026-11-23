@@ -44,10 +44,14 @@
   # Lab: UFS_PLATFORM = NONE, LAB (UfsHcPlatformLabDxe) or QCOM (QcomUfsHcDxe
   # from edk2-platforms with the lab DTB extension provider, which registers
   # the controller itself instead of UfsMmioDxe). UFS_LAB_FAIL_PHASE makes
-  # UfsHcPlatformLabDxe fail that callback phase (0-3).
+  # UfsHcPlatformLabDxe fail that callback phase (0-3). With QCOM,
+  # UFS_QCOM_CONFIG = DT runs the UEFI bring-up from the lab device-tree
+  # configuration; PCD uses the RB3Gen2 PCD configuration (the previous boot
+  # stage brought the link up, needs QEMU's x-link-up) and no DTB extension.
   #
   DEFINE UFS_PLATFORM            = NONE
   DEFINE UFS_LAB_FAIL_PHASE      = 0xFF
+  DEFINE UFS_QCOM_CONFIG         = DT
   DEFINE MP_SERVICES_ENABLE      = FALSE
 
   #
@@ -141,7 +145,19 @@
 [PcdsFixedAtBuild.common]
   gArmVirtTokenSpaceGuid.PcdUfsLabFailPhase|$(UFS_LAB_FAIL_PHASE)
 !if $(UFS_PLATFORM) == QCOM
+!if $(UFS_QCOM_CONFIG) == PCD
+  # As RB3Gen2.dsc, with the base address of QEMU's UFS window
+  gQualcommCommonSiliconPkgTokenSpaceGuid.PcdUfsConfigSourceDeviceTree|0
+  gQualcommCommonSiliconPkgTokenSpaceGuid.PcdUfs0MemBaseAddress|0x0B000000
+  gQualcommCommonSiliconPkgTokenSpaceGuid.PcdUfs0HciOffset|0x0
+  gQualcommCommonSiliconPkgTokenSpaceGuid.PcdUfs0PreHceCallbackEn|FALSE
+  gQualcommCommonSiliconPkgTokenSpaceGuid.PcdUfs0PostLinkCallbackEn|FALSE
+  gQualcommCommonSiliconPkgTokenSpaceGuid.PcdUfs0SkipHceReenable|TRUE
+  gQualcommCommonSiliconPkgTokenSpaceGuid.PcdUfs0SkipLinkStartup|TRUE
+  gQualcommCommonSiliconPkgTokenSpaceGuid.PcdUfs0RefClkFreq|3
+!else
   gQualcommCommonSiliconPkgTokenSpaceGuid.PcdUfsConfigSourceDeviceTree|1
+!endif
 !endif
 
 [PcdsFeatureFlag.common]
@@ -367,7 +383,9 @@
     <LibraryClasses>
       NonDiscoverableDeviceRegistrationLib|MdeModulePkg/Library/NonDiscoverableDeviceRegistrationLib/NonDiscoverableDeviceRegistrationLib.inf
   }
+!if $(UFS_QCOM_CONFIG) != PCD
   Platform/Qualcomm/Lab/QemuDtbExtnDxe/QemuDtbExtnDxe.inf
+!endif
 !endif
   ArmVirtPkg/Lab/UfsBlkTest/UfsBlkTest.inf
   MdeModulePkg/Bus/Ufs/UfsMemHcDxe/UfsMemHcDxe.inf
